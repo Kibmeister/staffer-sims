@@ -1,0 +1,11 @@
+# Secrets
+.env
+.env.*
+
+# Simulation outputs
+output/
+output/*.md
+output/*.jsonl
+output/**
+
+
