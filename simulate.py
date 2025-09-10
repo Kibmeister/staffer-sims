@@ -39,32 +39,25 @@ def send_sut(sut_cfg: dict, messages: List[Dict]) -> str:
 
 def send_proxy_user(proxy_cfg: dict, persona: dict, scenario: dict, messages: List[Dict]) -> str:
     """Role-play the persona with your LLM provider (replace with your SDK)."""
-    # Build a rich, explicit system prompt from persona and scenario fields
+    # Build a strict, explicit system prompt for the proxy user from persona and scenario fields
     system = (
-        f"You are {persona['name']}, {persona['role']} at a tech company in {persona.get('location', 'your city')}.\n"
-        f"{persona.get('about', '')}\n"
-        f"Your current hiring need: {persona.get('hiring_need', '')}\n"
-        f"Scenario: {scenario.get('entry_context', '')}\n"
-        f"Challenges:\n- " + "\n- ".join(scenario.get('challenges', [])) + "\n"
-        f"Requirements for the role:\n- " + "\n- ".join(scenario.get('requirements', [])) + "\n"
-        f"Goal: {scenario.get('goal', '')}\n"
         f"{persona.get('role_adherence', '')}\n"
-        f"Prohibited phrases:\n- " + "\n- ".join(persona.get('prohibited_phrases', [])) + "\n"
-        f"{persona.get('response_pattern', '')}\n"
-        f"{persona.get('behavioral_guardrails', '')}\n"
-        f"{persona.get('recovery_mechanism', '')}\n"
-        f"{persona.get('maintain_character', '')}\n"
+        f"FORBIDDEN BEHAVIORS:\n" + '\n'.join(persona.get('forbidden_behaviors', [])) + "\n"
+        f"REQUIRED BEHAVIORS:\n" + '\n'.join(persona.get('required_behaviors', [])) + "\n"
+        f"RESPONSE FORMULA: {persona.get('response_formula', '')}\n"
+        f"RECOVERY PHRASE: {persona.get('recovery_phrase', '')}\n"
+        f"CHARACTER MOTIVATION: {persona.get('character_motivation', '')}\n"
         f"{scenario.get('role_adherence', '')}\n"
-        f"Prohibited phrases (scenario):\n- " + "\n- ".join(scenario.get('prohibited_phrases', [])) + "\n"
-        f"{scenario.get('response_pattern', '')}\n"
-        f"{scenario.get('behavioral_guardrails', '')}\n"
-        f"{scenario.get('recovery_mechanism', '')}\n"
-        f"{scenario.get('maintain_character', '')}\n"
+        f"FORBIDDEN BEHAVIORS (scenario):\n" + '\n'.join(scenario.get('forbidden_behaviors', [])) + "\n"
+        f"REQUIRED BEHAVIORS (scenario):\n" + '\n'.join(scenario.get('required_behaviors', [])) + "\n"
+        f"RESPONSE FORMULA (scenario): {scenario.get('response_formula', '')}\n"
+        f"RECOVERY PHRASE (scenario): {scenario.get('recovery_phrase', '')}\n"
+        f"CHARACTER MOTIVATION (scenario): {scenario.get('character_motivation', '')}\n"
     )
     url = proxy_cfg["url"]
     headers = proxy_cfg.get("headers", {})
     payload = {
-        "model": "gpt-3.5-turbo",  # or your preferred model
+        "model": "gpt-4",  # or your preferred model
         "messages": [{"role": "system", "content": system}] + messages
     }
     print("[send_proxy_user] Payload:", payload)
@@ -155,13 +148,16 @@ def simulate(args):
         lf.update_current_trace(tags=[persona["name"], scenario["title"]])
         for turn_idx in range(max_turns):
             # SUT reply
+            messages_for_sut = (
+                [{"role": "system", "content": "You are the recruiter assistant. The user is the hiring manager."}] + messages
+            )
             with trace_span.start_as_current_observation(
                 as_type='span',
                 name="sut_message",
-                input={"messages": messages},
+                input={"messages": messages_for_sut},
                 metadata={"turn": turn_idx, "activity": "sut_message"}
             ) as sut_span:
-                sut_reply = send_sut(sut_cfg, messages)
+                sut_reply = send_sut(sut_cfg, messages_for_sut)
                 turns.append({"role":"system", "content": sut_reply})
                 sut_span.update(output={"text":sut_reply})
 
@@ -170,9 +166,12 @@ def simulate(args):
                 break
 
             # Proxy reply
+            messages_for_proxy = (
+                [{"role": "system", "content": "You are the hiring manager. The assistant is the recruiter."}] + messages + [{"role":"assistant","content": sut_reply}]
+            )
             proxy_input = {
                 "system": system,
-                "messages": messages + [{"role":"assistant","content": sut_reply}]
+                "messages": messages_for_proxy
             }
             with trace_span.start_as_current_observation(
                 as_type='span',
@@ -180,7 +179,7 @@ def simulate(args):
                 input=proxy_input,
                 metadata={"turn": turn_idx, "activity": "proxy_message", "system_prompt": system}
             ) as proxy_span:
-                proxy_reply = send_proxy_user(proxy_cfg, persona, scenario, messages + [{"role":"assistant","content": sut_reply}])
+                proxy_reply = send_proxy_user(proxy_cfg, persona, scenario, messages_for_proxy)
                 turns.append({"role":"user", "content": proxy_reply})
                 proxy_span.update(output={"text":proxy_reply})
 
