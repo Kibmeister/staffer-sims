@@ -9,3 +9,6 @@ output/*.jsonl
 output/**
 
 
+.venv/
+output/
+.env
