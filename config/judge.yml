@@ -1,0 +1,4 @@
+url: "https://api.openai.com/v1/chat/completions"    # any LLM provider
+headers:
+  Authorization: "Bearer KO3Z_vHnhpWOclK6D3ah78pRPWmZQFghIdNw3do2Qt42aG1N9bS0pdPG5D3sY0SR1z27bTvNQlT3BlbkFJ2ZjHjuGzREsXGV9kzsG5wisUFPerJEaMZhtST5DO3GzMoX2xFa2eowuq3OLWo2qIobX1c6cPYA"
+rubric_path: "config/judge_rubric.yml"
