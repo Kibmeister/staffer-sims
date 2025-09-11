@@ -22,7 +22,7 @@ class Message(BaseModel):
     content: str
 
 class Config(BaseModel):
-    model: str = "gpt-4"
+    model: str = "gpt-4o-mini"
     temperature: float = 0.2
 
 class Trace(BaseModel):

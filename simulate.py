@@ -57,7 +57,7 @@ def send_proxy_user(proxy_cfg: dict, persona: dict, scenario: dict, messages: Li
     url = proxy_cfg["url"]
     headers = proxy_cfg.get("headers", {})
     payload = {
-        "model": "gpt-4",  # or your preferred model
+        "model": "gpt-4o-mini",  # or your preferred model
         "messages": [{"role": "system", "content": system}] + messages
     }
     print("[send_proxy_user] Payload:", payload)
@@ -75,39 +75,7 @@ def send_proxy_user(proxy_cfg: dict, persona: dict, scenario: dict, messages: Li
         raise
 
 ### ---------- Judge (Critique) ----------
-def judge_transcript(judge_cfg: dict, transcript_md: str) -> Dict:
-    """Ask an LLM to score the run and suggest improvements."""
-    rubric = load_yaml(judge_cfg["rubric_path"])
-    prompt = f"""
-You are a senior Conversation Designer and Copywriter.
-Score the transcript below using these metrics (0–5): {rubric['metrics']}.
-Return JSON with: scores, top_issues (5 bullets), prompt_deltas (edits to system prompt),
-copy_fixes (3 rewrites), next_experiment (one idea).
-
-Transcript (Markdown):
-{transcript_md}
-"""
-    url = judge_cfg["url"]
-    headers = judge_cfg.get("headers", {})
-    payload = {
-        "model": "gpt-4",  # or your preferred model
-        "messages": [{"role": "user", "content": prompt}]
-    }
-    r = requests.post(url, headers=headers, json=payload, timeout=120)
-    r.raise_for_status()
-    
-    # Extract response content from OpenRouter format
-    response_data = r.json()
-    if "choices" in response_data and len(response_data["choices"]) > 0:
-        content = response_data["choices"][0]["message"]["content"]
-        # Try to parse as JSON, fallback to text if not valid JSON
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError:
-            # If not valid JSON, return as text
-            return {"raw_response": content}
-    else:
-        raise ValueError("Invalid response format from judge API")
+# judge_transcript function removed - now using Langfuse evaluations
 
 ### ---------- Langfuse ----------
 def init_langfuse(cfg):
@@ -116,6 +84,139 @@ def init_langfuse(cfg):
         secret_key=cfg["secret_key"],
         host=cfg.get("host")  # optional for self-hosted
     )
+
+def extract_conversation_summary(turns):
+    """Extract a comprehensive summary of the conversation."""
+    summary = {
+        "total_turns": len(turns),
+        "conversation_flow": [],
+        "key_information_gathered": [],
+        "conversation_quality": "unknown"
+    }
+    
+    # Extract conversation flow
+    for i, turn in enumerate(turns):
+        role = turn.get("role", "unknown")
+        content = turn.get("content", "")
+        summary["conversation_flow"].append({
+            "turn": i + 1,
+            "role": role,
+            "content_preview": content[:100] + "..." if len(content) > 100 else content
+        })
+    
+    # Extract key information (look for structured data in SUT responses)
+    for turn in turns:
+        if turn.get("role") == "system":  # SUT responses
+            content = turn.get("content", "").lower()
+            if "job title:" in content or "salary range:" in content or "experience level:" in content:
+                summary["key_information_gathered"].append("role_requirements")
+            if "location:" in content or "remote" in content:
+                summary["key_information_gathered"].append("work_location")
+            if "skills:" in content or "technologies:" in content:
+                summary["key_information_gathered"].append("technical_skills")
+    
+    return summary
+
+def determine_conversation_outcome(turns, sut_provided_summary, proxy_confirmed):
+    """Determine the final outcome of the conversation."""
+    outcome = {
+        "status": "incomplete",
+        "completion_level": 0,
+        "success_indicators": [],
+        "issues": []
+    }
+    
+    # Check for successful completion
+    if sut_provided_summary and proxy_confirmed:
+        outcome["status"] = "completed_successfully"
+        outcome["completion_level"] = 100
+        outcome["success_indicators"].append("role_summary_provided")
+        outcome["success_indicators"].append("user_confirmed_summary")
+    elif sut_provided_summary:
+        outcome["status"] = "summary_provided_awaiting_confirmation"
+        outcome["completion_level"] = 80
+        outcome["success_indicators"].append("role_summary_provided")
+        outcome["issues"].append("user_did_not_confirm")
+    else:
+        outcome["status"] = "incomplete"
+        outcome["completion_level"] = 50
+        outcome["issues"].append("no_role_summary_provided")
+    
+    # Check for role-playing quality
+    for turn in turns:
+        if turn.get("role") == "user":  # Proxy responses
+            content = turn.get("content", "").lower()
+            if "sorry, i'm the one who needs help" in content:
+                outcome["success_indicators"].append("role_adherence_maintained")
+            if "drowning in work" in content or "systems are getting hammered" in content:
+                outcome["success_indicators"].append("persona_characteristics_expressed")
+    
+    return outcome
+
+def extract_information_gathered(turns):
+    """Extract structured information that was gathered during the conversation."""
+    info = {
+        "role_type": None,
+        "location": None,
+        "employment_type": None,
+        "experience_level": None,
+        "salary_range": None,
+        "skills_mentioned": [],
+        "responsibilities": [],
+        "deadline": None
+    }
+    
+    # Look for structured information in SUT responses
+    for turn in turns:
+        if turn.get("role") == "system":  # SUT responses
+            content = turn.get("content", "")
+            
+            # Extract role type
+            if "senior backend engineer" in content.lower():
+                info["role_type"] = "Senior Backend Engineer"
+            
+            # Extract location
+            if "san francisco" in content.lower():
+                info["location"] = "San Francisco"
+            elif "remote" in content.lower():
+                info["location"] = "Remote"
+            
+            # Extract employment type
+            if "full-time" in content.lower():
+                info["employment_type"] = "Full-time"
+            elif "part-time" in content.lower():
+                info["employment_type"] = "Part-time"
+            elif "contract" in content.lower():
+                info["employment_type"] = "Contract"
+            
+            # Extract experience level
+            if "5-7 years" in content or "5 to 7 years" in content:
+                info["experience_level"] = "5-7 years"
+            elif "senior" in content.lower():
+                info["experience_level"] = "Senior level"
+            
+            # Extract salary range
+            if "$" in content:
+                import re
+                salary_match = re.search(r'\$[\d,]+(?:-\$[\d,]+)?', content)
+                if salary_match:
+                    info["salary_range"] = salary_match.group()
+            
+            # Extract skills
+            if "node.js" in content.lower():
+                info["skills_mentioned"].append("Node.js")
+            if "java" in content.lower():
+                info["skills_mentioned"].append("Java")
+            if "python" in content.lower():
+                info["skills_mentioned"].append("Python")
+            if "aws" in content.lower():
+                info["skills_mentioned"].append("AWS")
+            if "microservices" in content.lower():
+                info["skills_mentioned"].append("Microservices")
+            if "postgresql" in content.lower():
+                info["skills_mentioned"].append("PostgreSQL")
+    
+    return info
 
 ### ---------- Transcript export ----------
 def to_markdown(run_id, persona, scenario, turns):
@@ -131,7 +232,7 @@ def simulate(args):
     sut_cfg = load_yaml(args.sut)
     lf_cfg = load_yaml(args.langfuse)
     proxy_cfg = load_yaml(args.proxy)
-    judge_cfg = load_yaml(args.judge)
+    # judge_cfg removed - now using Langfuse evaluations
 
     lf = init_langfuse(lf_cfg)
     run_id = now_id()
@@ -184,14 +285,13 @@ def simulate(args):
                 turns.append({"role":"system", "content": sut_reply})
                 sut_span.update(output={"text":sut_reply})
 
-            # Stop conditions (comprehensive keywords for role completion)
-            stop_phrases = [
+            # Check if SUT provided a summary (but don't stop yet)
+            summary_phrases = [
                 "here's the role", "here is the role", "to summarize", "summary of the role",
                 "candidate preview", "publish", "job description", "role summary",
-                "does this accurately capture", "capture everything", "accurately capture"
+                "should i lock these in", "great, i've got everything"
             ]
-            if any(phrase in sut_reply.lower() for phrase in stop_phrases):
-                break
+            sut_provided_summary = any(phrase in sut_reply.lower() for phrase in summary_phrases)
 
             # Proxy reply
             messages_for_proxy = (
@@ -211,6 +311,15 @@ def simulate(args):
                 turns.append({"role":"user", "content": proxy_reply})
                 proxy_span.update(output={"text":proxy_reply})
 
+            # Check if user confirmed the summary (stop after confirmation)
+            if sut_provided_summary:
+                confirmation_phrases = [
+                    "yes", "looks good", "that's correct", "perfect", "sounds good",
+                    "that works", "confirmed", "accurate", "exactly what i need"
+                ]
+                if any(phrase in proxy_reply.lower() for phrase in confirmation_phrases):
+                    break
+
             messages.extend([
                 {"role":"assistant","content": sut_reply},
                 {"role":"user","content": proxy_reply}
@@ -226,30 +335,60 @@ def simulate(args):
         with open(jsonl_path, "w") as f:
             for t in turns: f.write(json.dumps(t, ensure_ascii=False) + "\n")
 
-        # Judge
-        critique = judge_transcript(judge_cfg, md)
-        lf.create_event(name="critique", output=critique)
+        # Extract conversation analysis
+        conversation_summary = extract_conversation_summary(turns)
         
-        # Create evaluation scores in Langfuse
-        if critique and "scores" in critique:
-            for score_name, score_value in critique["scores"].items():
-                lf.create_score(
-                    name=score_name,
-                    value=score_value,
-                    comment=f"Judge evaluation: {score_name}",
-                    trace_id=lf.get_current_trace_id()
-                )
+        # Check if proxy confirmed (look at last proxy response)
+        proxy_confirmed = False
+        if turns and turns[-1].get("role") == "user":
+            last_proxy_response = turns[-1].get("content", "").lower()
+            confirmation_phrases = ["yes", "looks good", "that's correct", "perfect", "sounds good", "that works", "confirmed", "accurate", "exactly what i need"]
+            proxy_confirmed = any(phrase in last_proxy_response for phrase in confirmation_phrases)
         
-        # Create feedback for top issues
-        if critique and "top_issues" in critique:
-            for i, issue in enumerate(critique["top_issues"][:3]):  # Limit to top 3 issues
-                lf.create_event(
-                    name=f"Judge Issue #{i+1}",
-                    output=issue
-                )
+        final_outcome = determine_conversation_outcome(turns, sut_provided_summary, proxy_confirmed)
+        information_gathered = extract_information_gathered(turns)
         
-        lf.update_current_trace(metadata={"transcript_path": md_path, "jsonl_path": jsonl_path})
-        print(f"Saved: {md_path}\nSaved: {jsonl_path}\nScores: {critique.get('scores')}")
+        # Update trace with comprehensive output
+        lf.update_current_trace(
+            output={
+                "conversation_summary": conversation_summary,
+                "final_outcome": final_outcome,
+                "total_turns": len(turns),
+                "information_gathered": information_gathered,
+                "transcript": md,
+                "persona": persona["name"],
+                "scenario": scenario["title"]
+            },
+            metadata={
+                "transcript_path": md_path, 
+                "jsonl_path": jsonl_path,
+                "completion_status": final_outcome["status"],
+                "completion_level": final_outcome["completion_level"]
+            }
+        )
+        
+        # Langfuse Evaluations (replaces custom judge logic)
+        # Create a comprehensive evaluation event
+        lf.create_event(
+            name="conversation_evaluation",
+            input=md,
+            output={
+                "transcript": md, 
+                "turns": len(turns), 
+                "persona": persona["name"], 
+                "scenario": scenario["title"],
+                "conversation_summary": conversation_summary,
+                "final_outcome": final_outcome,
+                "information_gathered": information_gathered
+            }
+        )
+        
+        # Note: Individual scores will be created by Langfuse's configured evaluations
+        # This event triggers the evaluation pipeline in Langfuse
+        print(f"Saved: {md_path}\nSaved: {jsonl_path}")
+        print(f"Conversation Outcome: {final_outcome['status']} (Level: {final_outcome['completion_level']}%)")
+        print(f"Information Gathered: {len(information_gathered['skills_mentioned'])} skills, Role: {information_gathered['role_type']}, Location: {information_gathered['location']}")
+        print("Evaluations: Sent to Langfuse for processing")
 
 
 if __name__ == "__main__":
@@ -259,7 +398,7 @@ if __name__ == "__main__":
     ap.add_argument("--sut", default="config/sut.yml")
     ap.add_argument("--proxy", default="config/proxy.yml")
     ap.add_argument("--langfuse", default="config/langfuse.yml")
-    ap.add_argument("--judge", default="config/judge.yml")
+    # --judge argument removed - now using Langfuse evaluations
     ap.add_argument("--output", default="output")
     args = ap.parse_args()
     simulate(args)
