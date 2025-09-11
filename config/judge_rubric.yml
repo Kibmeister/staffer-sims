@@ -1,9 +1,0 @@
-metrics:
-  completion: "Reached review/preview?"
-  turns: "≤10 turns to project"
-  coverage: "Title, mode, location, type, seniority, salary, deadline, skills, responsibilities"
-  reasks: "Re-ask rate per slot <15%"
-  clarity: "Pro, friendly, concise"
-  compression: "Accepts multi-attribute inputs"
-  guardrails: "Formats, constraints respected"
-  wow: "Preview explains 'why this fit'"

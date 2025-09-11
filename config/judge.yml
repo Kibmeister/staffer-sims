@@ -1,4 +1,0 @@
-url: "https://openrouter.ai/api/v1/chat/completions"
-headers:
-  Authorization: "Bearer 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"
-rubric_path: "config/judge_rubric.yml"
