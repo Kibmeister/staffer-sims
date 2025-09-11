@@ -1,6 +1,6 @@
-url: "https://api.openai.com/v1/chat/completions"   # can be OpenAI/Claude wrapper or your own
+url: "https://openrouter.ai/api/v1/chat/completions"
 headers:
-  Authorization: "Bearer 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"
+  Authorization: "Bearer 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"
 
 
 

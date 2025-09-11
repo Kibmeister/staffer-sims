@@ -89,10 +89,25 @@ Transcript (Markdown):
 """
     url = judge_cfg["url"]
     headers = judge_cfg.get("headers", {})
-    payload = {"prompt": prompt}
+    payload = {
+        "model": "gpt-4",  # or your preferred model
+        "messages": [{"role": "user", "content": prompt}]
+    }
     r = requests.post(url, headers=headers, json=payload, timeout=120)
     r.raise_for_status()
-    return r.json()  # expects a dict with keys described above
+    
+    # Extract response content from OpenRouter format
+    response_data = r.json()
+    if "choices" in response_data and len(response_data["choices"]) > 0:
+        content = response_data["choices"][0]["message"]["content"]
+        # Try to parse as JSON, fallback to text if not valid JSON
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            # If not valid JSON, return as text
+            return {"raw_response": content}
+    else:
+        raise ValueError("Invalid response format from judge API")
 
 ### ---------- Langfuse ----------
 def init_langfuse(cfg):
@@ -145,7 +160,15 @@ def simulate(args):
             "entry": scenario["entry_context"]
         }
     ) as trace_span:
-        lf.update_current_trace(tags=[persona["name"], scenario["title"]])
+        # Set comprehensive tags for filtering and grouping
+        lf.update_current_trace(tags=[
+            persona["name"], 
+            scenario["title"],
+            "simulation",
+            f"persona-{persona['name'].lower().replace(' ', '-')}",
+            f"scenario-{scenario['title'].lower().replace(' ', '-')}",
+            persona["role"]
+        ])
         for turn_idx in range(max_turns):
             # SUT reply
             messages_for_sut = (
@@ -155,14 +178,19 @@ def simulate(args):
                 as_type='span',
                 name="sut_message",
                 input={"messages": messages_for_sut},
-                metadata={"turn": turn_idx, "activity": "sut_message"}
+                metadata={"turn": turn_idx, "activity": "sut_message", "model": "staffer-sut"}
             ) as sut_span:
                 sut_reply = send_sut(sut_cfg, messages_for_sut)
                 turns.append({"role":"system", "content": sut_reply})
                 sut_span.update(output={"text":sut_reply})
 
-            # Stop conditions (simple keywords; refine as needed)
-            if any(k in sut_reply.lower() for k in ["here's the role", "candidate preview", "publish"]):
+            # Stop conditions (comprehensive keywords for role completion)
+            stop_phrases = [
+                "here's the role", "here is the role", "to summarize", "summary of the role",
+                "candidate preview", "publish", "job description", "role summary",
+                "does this accurately capture", "capture everything", "accurately capture"
+            ]
+            if any(phrase in sut_reply.lower() for phrase in stop_phrases):
                 break
 
             # Proxy reply
@@ -177,7 +205,7 @@ def simulate(args):
                 as_type='span',
                 name="proxy_message",
                 input=proxy_input,
-                metadata={"turn": turn_idx, "activity": "proxy_message", "system_prompt": system}
+                metadata={"turn": turn_idx, "activity": "proxy_message", "system_prompt": system, "model": "gpt-4"}
             ) as proxy_span:
                 proxy_reply = send_proxy_user(proxy_cfg, persona, scenario, messages_for_proxy)
                 turns.append({"role":"user", "content": proxy_reply})
@@ -201,6 +229,25 @@ def simulate(args):
         # Judge
         critique = judge_transcript(judge_cfg, md)
         lf.create_event(name="critique", output=critique)
+        
+        # Create evaluation scores in Langfuse
+        if critique and "scores" in critique:
+            for score_name, score_value in critique["scores"].items():
+                lf.create_score(
+                    name=score_name,
+                    value=score_value,
+                    comment=f"Judge evaluation: {score_name}",
+                    trace_id=lf.get_current_trace_id()
+                )
+        
+        # Create feedback for top issues
+        if critique and "top_issues" in critique:
+            for i, issue in enumerate(critique["top_issues"][:3]):  # Limit to top 3 issues
+                lf.create_event(
+                    name=f"Judge Issue #{i+1}",
+                    output=issue
+                )
+        
         lf.update_current_trace(metadata={"transcript_path": md_path, "jsonl_path": jsonl_path})
         print(f"Saved: {md_path}\nSaved: {jsonl_path}\nScores: {critique.get('scores')}")
 
