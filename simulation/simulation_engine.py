@@ -1,0 +1,328 @@
+"""
+Simulation Engine
+Main orchestrator for persona simulation conversations
+"""
+import os
+import json
+import logging
+from datetime import datetime
+from typing import Dict, Any, List
+from pathlib import Path
+
+from services import SUTClient, ProxyClient, LangfuseService
+from services.base_api_client import APIClientConfig
+from services.langfuse_service import LangfuseConfig, ConversationMetadata
+from analysis import ConversationAnalyzer
+from config.settings import Settings
+
+logger = logging.getLogger(__name__)
+
+class SimulationEngine:
+    """Main engine for running persona simulations"""
+    
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self.analyzer = ConversationAnalyzer()
+        
+        # Initialize clients
+        self.sut_client = self._create_sut_client()
+        self.proxy_client = self._create_proxy_client()
+        self.langfuse_service = self._create_langfuse_service()
+        
+        logger.info("Simulation engine initialized")
+    
+    def _create_sut_client(self) -> SUTClient:
+        """Create SUT client from settings"""
+        sut_config = self.settings.get_sut_api_config()
+        config = APIClientConfig(
+            url=sut_config["url"],
+            headers=sut_config["headers"],
+            timeout=self.settings.request_timeout,
+            max_retries=self.settings.retry_attempts,
+            model=sut_config.get("model")
+        )
+        return SUTClient(config)
+    
+    def _create_proxy_client(self) -> ProxyClient:
+        """Create proxy client from settings"""
+        proxy_config = self.settings.get_proxy_api_config()
+        config = APIClientConfig(
+            url=proxy_config["url"],
+            headers=proxy_config["headers"],
+            timeout=self.settings.request_timeout,
+            max_retries=self.settings.retry_attempts,
+            model=proxy_config.get("model")
+        )
+        return ProxyClient(config)
+    
+    def _create_langfuse_service(self) -> LangfuseService:
+        """Create Langfuse service from settings"""
+        lf_config = self.settings.get_langfuse_config()
+        config = LangfuseConfig(
+            public_key=lf_config["public_key"],
+            secret_key=lf_config["secret_key"],
+            host=lf_config.get("host")
+        )
+        return LangfuseService(config)
+    
+    def _build_persona_system_prompt(self, persona: Dict[str, Any]) -> str:
+        """Build system prompt for persona role-playing"""
+        return (
+            f"You role-play {persona['name']}, a {persona['role']}. "
+            f"Style: {persona.get('voice','concise')}. "
+            f"Goals: {', '.join(persona.get('goals', [])).strip()}. "
+            "Provide multiple details in one message when asked for basics. "
+            "If unsure, ask 1 clarifying question; otherwise answer naturally."
+        )
+    
+    def _save_transcript(self, run_id: str, persona: Dict[str, Any], 
+                        scenario: Dict[str, Any], turns: List[Dict[str, Any]], 
+                        output_dir: str) -> tuple[str, str]:
+        """
+        Save conversation transcript in both markdown and JSONL formats
+        
+        Returns:
+            Tuple of (markdown_path, jsonl_path)
+        """
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Save markdown
+        md_path = os.path.join(output_dir, f"{run_id}.md")
+        with open(md_path, "w") as f:
+            f.write(self._to_markdown(run_id, persona, scenario, turns))
+        
+        # Save JSONL
+        jsonl_path = os.path.join(output_dir, f"{run_id}.jsonl")
+        with open(jsonl_path, "w") as f:
+            for turn in turns:
+                f.write(json.dumps(turn, ensure_ascii=False) + "\n")
+        
+        logger.info(f"Saved transcript: {md_path} and {jsonl_path}")
+        return md_path, jsonl_path
+    
+    def _to_markdown(self, run_id: str, persona: Dict[str, Any], 
+                    scenario: Dict[str, Any], turns: List[Dict[str, Any]]) -> str:
+        """Convert conversation to markdown format"""
+        lines = [
+            f"# Transcript {run_id}",
+            f"**Persona:** {persona['name']}",
+            f"**Scenario:** {scenario['title']}",
+            ""
+        ]
+        
+        for turn in turns:
+            lines.append(f"**{turn['role'].title()}**: {turn['content']}")
+        
+        return "\n\n".join(lines)
+    
+    def run_simulation(self, persona: Dict[str, Any], scenario: Dict[str, Any], 
+                      output_dir: str = None) -> Dict[str, Any]:
+        """
+        Run a complete persona simulation
+        
+        Args:
+            persona: Persona configuration
+            scenario: Scenario configuration
+            output_dir: Output directory for transcripts
+            
+        Returns:
+            Simulation results dictionary
+        """
+        run_id = self._generate_run_id()
+        max_turns = scenario.get("max_turns", self.settings.max_turns)
+        output_dir = output_dir or self.settings.output_dir
+        
+        logger.info(f"Starting simulation {run_id} with {max_turns} max turns")
+        
+        # Initialize conversation - start with empty messages since proxy will make first message
+        messages = []
+        turns = []
+        persona_system_prompt = self._build_persona_system_prompt(persona)
+        
+        # Start Langfuse trace
+        with self.langfuse_service.start_conversation_trace(
+            persona["name"], scenario["title"], scenario.get("entry_context", "")
+        ) as trace:
+            
+            # Set trace tags
+            self.langfuse_service.update_trace_tags([
+                persona["name"], 
+                scenario["title"]
+            ])
+            
+            # Main conversation loop
+            sut_provided_summary = False
+            
+            for turn_idx in range(max_turns):
+                logger.debug(f"Starting turn {turn_idx + 1}")
+                
+                # For the first turn, start with proxy user (Alex) making the first message
+                if turn_idx == 0:
+                    # Proxy makes the first message
+                    proxy_reply = self._handle_proxy_turn(turn_idx, messages, "", 
+                                                        persona, scenario, persona_system_prompt)
+                    turns.append({"role": "user", "content": proxy_reply})
+                    messages.append({"role": "user", "content": proxy_reply})
+                    
+                    # Then SUT responds
+                    sut_reply = self._handle_sut_turn(turn_idx, messages, persona_system_prompt)
+                    turns.append({"role": "system", "content": sut_reply})
+                    messages.append({"role": "assistant", "content": sut_reply})
+                    
+                    # Check if SUT provided summary
+                    sut_provided_summary = self.analyzer.check_sut_provided_summary(sut_reply)
+                else:
+                    # For subsequent turns, follow normal SUT -> Proxy pattern
+                    # Proxy reply
+                    proxy_reply = self._handle_proxy_turn(turn_idx, messages, sut_reply, 
+                                                        persona, scenario, persona_system_prompt)
+                    turns.append({"role": "user", "content": proxy_reply})
+                    
+                    # Update messages for next iteration
+                    messages.extend([
+                        {"role": "assistant", "content": sut_reply},
+                        {"role": "user", "content": proxy_reply}
+                    ])
+                    
+                    # Check for conversation completion
+                    if sut_provided_summary and self.analyzer.check_proxy_confirmation(proxy_reply):
+                        logger.info(f"Conversation completed successfully at turn {turn_idx + 1}")
+                        break
+                    
+                    # SUT reply (for next iteration)
+                    sut_reply = self._handle_sut_turn(turn_idx, messages, persona_system_prompt)
+                    turns.append({"role": "system", "content": sut_reply})
+                    messages.append({"role": "assistant", "content": sut_reply})
+                    
+                    # Check if SUT provided summary
+                    sut_provided_summary = self.analyzer.check_sut_provided_summary(sut_reply)
+            
+            # Save transcript
+            md_path, jsonl_path = self._save_transcript(run_id, persona, scenario, turns, output_dir)
+            
+            # Analyze conversation
+            conversation_summary = self.analyzer.extract_conversation_summary(turns)
+            
+            # Check if proxy confirmed (look at last proxy response)
+            proxy_confirmed = False
+            if turns and turns[-1].get("role") == "user":
+                proxy_confirmed = self.analyzer.check_proxy_confirmation(
+                    turns[-1].get("content", "")
+                )
+            
+            final_outcome = self.analyzer.determine_conversation_outcome(
+                turns, sut_provided_summary, proxy_confirmed
+            )
+            information_gathered = self.analyzer.extract_information_gathered(turns)
+            
+            # Update Langfuse trace
+            metadata = ConversationMetadata(
+                persona_name=persona["name"],
+                scenario_title=scenario["title"],
+                total_turns=len(turns),
+                completion_status=final_outcome.status,
+                completion_level=final_outcome.completion_level,
+                transcript_path=md_path,
+                jsonl_path=jsonl_path
+            )
+            
+            transcript_md = self._to_markdown(run_id, persona, scenario, turns)
+            
+            self.langfuse_service.update_trace_output(
+                conversation_summary.__dict__, final_outcome.__dict__, 
+                information_gathered.__dict__, transcript_md, metadata
+            )
+            
+            # Create evaluation event
+            self.langfuse_service.create_evaluation_event(
+                transcript_md, len(turns), persona["name"], scenario["title"],
+                conversation_summary.__dict__, final_outcome.__dict__, 
+                information_gathered.__dict__
+            )
+            
+            # Flush Langfuse data
+            self.langfuse_service.flush()
+            
+            # Prepare results
+            results = {
+                "run_id": run_id,
+                "persona": persona["name"],
+                "scenario": scenario["title"],
+                "total_turns": len(turns),
+                "conversation_summary": conversation_summary.__dict__,
+                "final_outcome": final_outcome.__dict__,
+                "information_gathered": information_gathered.__dict__,
+                "transcript_path": md_path,
+                "jsonl_path": jsonl_path
+            }
+            
+            logger.info(f"Simulation completed: {final_outcome.status} ({final_outcome.completion_level}%)")
+            return results
+    
+    def _handle_sut_turn(self, turn_idx: int, messages: List[Dict[str, str]], 
+                        system_prompt: str) -> str:
+        """Handle a single SUT turn"""
+        # For the first turn, use a special introductory prompt
+        if turn_idx == 0:
+            recruiter_prompt = self._load_intro_prompt()
+            logger.debug(f"Using intro prompt for turn {turn_idx}")
+        else:
+            recruiter_prompt = self._load_recruiter_prompt()
+            logger.debug(f"Using full recruiter prompt for turn {turn_idx}")
+        
+        messages_for_sut = [
+            {"role": "system", "content": recruiter_prompt}
+        ] + messages
+        
+        with self.langfuse_service.start_sut_span(turn_idx, messages_for_sut) as sut_span:
+            sut_reply = self.sut_client.send_conversation(messages_for_sut)
+            sut_span.update(output={"text": sut_reply})
+            return sut_reply
+    
+    def _handle_proxy_turn(self, turn_idx: int, messages: List[Dict[str, str]], 
+                          sut_reply: str, persona: Dict[str, Any], 
+                          scenario: Dict[str, Any], system_prompt: str) -> str:
+        """Handle a single proxy turn"""
+        messages_for_proxy = [
+            {"role": "system", "content": "You are the hiring manager. The assistant is the recruiter."}
+        ] + messages + [{"role": "assistant", "content": sut_reply}]
+        
+        with self.langfuse_service.start_proxy_span(turn_idx, system_prompt, messages_for_proxy) as proxy_span:
+            proxy_reply = self.proxy_client.send_persona_message(
+                persona, scenario, messages_for_proxy
+            )
+            proxy_span.update(output={"text": proxy_reply})
+            return proxy_reply
+    
+    def _load_intro_prompt(self) -> str:
+        """Load the introductory prompt for the first SUT message"""
+        return """You are an expert recruiter assistant with extensive experience in hiring and recruiting. You help hiring managers define roles, clarify requirements, and streamline the hiring process.
+
+Your capabilities include:
+- Role definition and job description creation
+- Candidate criteria development  
+- Screening question creation
+- Hiring process optimization
+
+You are warm, professional, and efficient. You ask thoughtful questions to understand hiring needs and provide actionable guidance.
+
+IMPORTANT: For your first message, introduce yourself briefly and ask "How can I help you?" Do not assume any specific role, job title, or make assumptions about what they need. Let them tell you what they're looking for. Do not mention any specific job titles or roles until they tell you what they need."""
+    
+    def _load_recruiter_prompt(self) -> str:
+        """Load the recruiter system prompt from file"""
+        try:
+            prompt_path = Path("prompts/recruiter_v1.txt")
+            if prompt_path.exists():
+                with open(prompt_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+            else:
+                logger.warning("Recruiter prompt file not found, using fallback")
+                return "You are a recruiter assistant. Ask questions to understand the hiring needs and gather information progressively. Do not provide complete job descriptions immediately."
+        except Exception as e:
+            logger.error(f"Error loading recruiter prompt: {e}")
+            return "You are a recruiter assistant. Ask questions to understand the hiring needs and gather information progressively. Do not provide complete job descriptions immediately."
+    
+    def _generate_run_id(self) -> str:
+        """Generate unique run ID"""
+        import uuid
+        return datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S") + f"_run-{uuid.uuid4().hex[:6]}"
