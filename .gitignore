@@ -1,6 +1,13 @@
-# Secrets
+# Secrets and Environment Files
 .env
 .env.*
+*.env
+!env.template
+!config/environments/*.env
+
+# Virtual Environment
+.venv/
+venv/
 
 # Simulation outputs
 output/
@@ -8,7 +15,35 @@ output/*.md
 output/*.jsonl
 output/**
 
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-.venv/
-output/
-.env
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

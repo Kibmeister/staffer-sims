@@ -7,8 +7,16 @@ import requests
 from dotenv import load_dotenv
 load_dotenv()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_URL = "https://api.openai.com/v1/chat/completions"
+# Import configuration system
+from config.env_loader import load_environment_config
+from config.settings import get_settings
+
+# Load environment configuration
+load_environment_config()
+settings = get_settings()
+
+# Get API configuration based on provider setting
+API_CONFIG = settings.get_sut_api_config()
 
 def load_system_prompt(prompt_name="recruiter_v1.txt"):
     prompt_path = os.path.join(os.path.dirname(__file__), "prompts", prompt_name)
@@ -22,7 +30,7 @@ class Message(BaseModel):
     content: str
 
 class Config(BaseModel):
-    model: str = "gpt-4o-mini"
+    model: str = API_CONFIG.get("model", "gpt-4o-mini")
     temperature: float = 0.2
 
 class Trace(BaseModel):
@@ -44,14 +52,15 @@ app = FastAPI(title="Staffer SUT Chat API")
 def root():
     return {"message": "Staffer SUT API is running!"}
 
-def call_openai(messages: List[Dict[str, str]], cfg: Config) -> Dict[str, Any]:
-    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
+def call_llm_api(messages: List[Dict[str, str]], cfg: Config) -> Dict[str, Any]:
+    """Call the configured LLM API (OpenAI or OpenRouter)"""
+    headers = API_CONFIG["headers"]
     payload = {
         "model": cfg.model,
         "temperature": cfg.temperature,
         "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages
     }
-    r = requests.post(OPENAI_URL, headers=headers, json=payload, timeout=60)
+    r = requests.post(API_CONFIG["url"], headers=headers, json=payload, timeout=60)
     if r.status_code != 200:
         raise HTTPException(status_code=502, detail=r.text)
     return r.json()
@@ -70,7 +79,7 @@ def sut_chat(req: ChatRequest):
     # Build LLM messages
     llm_msgs = [{"role": m.role, "content": m.content} for m in req.messages]
 
-    data = call_openai(llm_msgs, req.config)
+    data = call_llm_api(llm_msgs, req.config)
     choice = data["choices"][0]
     text = choice["message"]["content"]
     usage = data.get("usage", {})

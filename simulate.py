@@ -3,9 +3,18 @@ import os, json, time, uuid, yaml, argparse
 from datetime import datetime
 from typing import List, Dict
 import requests
+import logging
 
 # pip install langfuse pyyaml python-dotenv
 from langfuse import Langfuse
+from dotenv import load_dotenv
+
+# Load .env file first
+load_dotenv()
+
+# Import our new configuration system
+from config.env_loader import load_environment_config
+from config.settings import get_settings
 
 ### ---------- helpers ----------
 def load_yaml(p): 
@@ -57,7 +66,7 @@ def send_proxy_user(proxy_cfg: dict, persona: dict, scenario: dict, messages: Li
     url = proxy_cfg["url"]
     headers = proxy_cfg.get("headers", {})
     payload = {
-        "model": "gpt-4o-mini",  # or your preferred model
+        "model": proxy_cfg.get("model", "gpt-4o-mini"),
         "messages": [{"role": "system", "content": system}] + messages
     }
     print("[send_proxy_user] Payload:", payload)
@@ -227,17 +236,34 @@ def to_markdown(run_id, persona, scenario, turns):
 
 ### ---------- Main loop ----------
 def simulate(args):
+    # Load environment configuration
+    load_environment_config()
+    
+    # Get settings instance
+    settings = get_settings()
+    
+    # Setup logging
+    logging.basicConfig(
+        level=getattr(logging, settings.log_level),
+        format=settings.log_format
+    )
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"Starting simulation in {settings.environment} environment")
+    logger.debug(f"Configuration: {settings.to_dict()}")
+    
     persona = load_yaml(args.persona)
     scenario = load_yaml(args.scenario)
-    sut_cfg = load_yaml(args.sut)
-    lf_cfg = load_yaml(args.langfuse)
-    proxy_cfg = load_yaml(args.proxy)
-    # judge_cfg removed - now using Langfuse evaluations
+    
+    # Use new configuration system instead of YAML files
+    sut_cfg = settings.get_sut_config()
+    lf_cfg = settings.get_langfuse_config()
+    proxy_cfg = settings.get_proxy_api_config()
 
     lf = init_langfuse(lf_cfg)
     run_id = now_id()
     turns = []
-    max_turns = scenario.get("max_turns", 18)
+    max_turns = scenario.get("max_turns", settings.max_turns)
 
     # Kickoff: either SUT greets or proxy states the need
     messages = [{"role":"user","content": scenario.get("entry_context","I want to hire.")}]
@@ -322,12 +348,13 @@ def simulate(args):
             ])
 
         # Export transcript
-        os.makedirs(args.output, exist_ok=True)
+        output_dir = args.output if hasattr(args, 'output') and args.output else settings.output_dir
+        os.makedirs(output_dir, exist_ok=True)
         md = to_markdown(run_id, persona, scenario, turns)
-        md_path = os.path.join(args.output, f"{run_id}.md")
+        md_path = os.path.join(output_dir, f"{run_id}.md")
         with open(md_path, "w") as f: f.write(md)
 
-        jsonl_path = os.path.join(args.output, f"{run_id}.jsonl")
+        jsonl_path = os.path.join(output_dir, f"{run_id}.jsonl")
         with open(jsonl_path, "w") as f:
             for t in turns: f.write(json.dumps(t, ensure_ascii=False) + "\n")
 
