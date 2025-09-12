@@ -102,7 +102,7 @@ class Settings:
             # Service URLs
             sut_url=os.getenv("SUT_URL", "http://localhost:8080/sut/chat"),
             proxy_url=os.getenv("PROXY_URL", "https://openrouter.ai/api/v1/chat/completions"),
-            langfuse_host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+            langfuse_host=os.getenv("LANGFUSE_HOST", "https://staffer-langfuse-staging.fly.dev"),
             
             # Performance Settings
             max_turns=int(os.getenv("MAX_TURNS", "18")),

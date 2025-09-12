@@ -275,6 +275,7 @@ def simulate(args):
         "Provide multiple details in one message when asked for basics. "
         "If unsure, ask 1 clarifying question; otherwise answer naturally."
     )
+    # Create the main trace using the correct Langfuse API
     with lf.start_as_current_observation(
         as_type='span',
         name="persona_simulation",
@@ -286,7 +287,7 @@ def simulate(args):
             "role": persona["role"],
             "entry": scenario["entry_context"]
         }
-    ) as trace_span:
+    ) as trace:
         # Set comprehensive tags for filtering and grouping
         lf.update_current_trace(tags=[
             persona["name"], 
@@ -297,7 +298,7 @@ def simulate(args):
             messages_for_sut = (
                 [{"role": "system", "content": "You are the recruiter assistant. The user is the hiring manager."}] + messages
             )
-            with trace_span.start_as_current_observation(
+            with lf.start_as_current_observation(
                 as_type='span',
                 name="sut_message",
                 input={"messages": messages_for_sut},
@@ -323,7 +324,7 @@ def simulate(args):
                 "system": system,
                 "messages": messages_for_proxy
             }
-            with trace_span.start_as_current_observation(
+            with lf.start_as_current_observation(
                 as_type='span',
                 name="proxy_message",
                 input=proxy_input,
@@ -408,6 +409,9 @@ def simulate(args):
         
         # Note: Individual scores will be created by Langfuse's configured evaluations
         # This event triggers the evaluation pipeline in Langfuse
+        # Flush to ensure data is sent to Langfuse
+        lf.flush()
+        
         print(f"Saved: {md_path}\nSaved: {jsonl_path}")
         print(f"Conversation Outcome: {final_outcome['status']} (Level: {final_outcome['completion_level']}%)")
         print(f"Information Gathered: {len(information_gathered['skills_mentioned'])} skills, Role: {information_gathered['role_type']}, Location: {information_gathered['location']}")
