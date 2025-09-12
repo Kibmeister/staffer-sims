@@ -134,7 +134,7 @@ class SimulationEngine:
         
         logger.info(f"Starting simulation {run_id} with {max_turns} max turns")
         
-        # Initialize conversation - start with empty messages since proxy will make first message
+        # Initialize conversation - start with empty messages; SUT will make first message
         messages = []
         turns = []
         persona_system_prompt = self._build_persona_system_prompt(persona)
@@ -156,20 +156,20 @@ class SimulationEngine:
             for turn_idx in range(max_turns):
                 logger.debug(f"Starting turn {turn_idx + 1}")
                 
-                # For the first turn, start with proxy user (Alex) making the first message
+                # For the first turn, start with SUT greeting and single question
                 if turn_idx == 0:
-                    # Proxy makes the first message
-                    proxy_reply = self._handle_proxy_turn(turn_idx, messages, "", 
-                                                        persona, scenario, persona_system_prompt)
-                    turns.append({"role": "user", "content": proxy_reply})
-                    messages.append({"role": "user", "content": proxy_reply})
-                    
-                    # Then SUT responds
+                    # SUT greets first
                     sut_reply = self._handle_sut_turn(turn_idx, messages, persona_system_prompt)
                     turns.append({"role": "system", "content": sut_reply})
                     messages.append({"role": "assistant", "content": sut_reply})
-                    
-                    # Check if SUT provided summary
+
+                    # Proxy replies next
+                    proxy_reply = self._handle_proxy_turn(turn_idx, messages, sut_reply, 
+                                                        persona, scenario, persona_system_prompt)
+                    turns.append({"role": "user", "content": proxy_reply})
+                    messages.append({"role": "user", "content": proxy_reply})
+
+                    # Check if SUT provided summary (unlikely on first turn)
                     sut_provided_summary = self.analyzer.check_sut_provided_summary(sut_reply)
                 else:
                     # For subsequent turns, follow normal SUT -> Proxy pattern
@@ -270,12 +270,22 @@ class SimulationEngine:
             recruiter_prompt = self._load_recruiter_prompt()
             logger.debug(f"Using full recruiter prompt for turn {turn_idx}")
         
+        # Prepend a lightweight controller to reduce multi-question drift
+        recruiter_prompt = self._prepend_controller(recruiter_prompt)
+        
         messages_for_sut = [
             {"role": "system", "content": recruiter_prompt}
         ] + messages
         
         with self.langfuse_service.start_sut_span(turn_idx, messages_for_sut) as sut_span:
             sut_reply = self.sut_client.send_conversation(messages_for_sut)
+            # Enforce one-question-only where appropriate
+            is_summary = self.analyzer.check_sut_provided_summary(sut_reply)
+            if not is_summary:
+                if turn_idx == 0:
+                    sut_reply = self._enforce_single_question_first_turn(sut_reply)
+                else:
+                    sut_reply = self._enforce_single_question_all_turns(sut_reply)
             sut_span.update(output={"text": sut_reply})
             return sut_reply
     
@@ -283,16 +293,33 @@ class SimulationEngine:
                           sut_reply: str, persona: Dict[str, Any], 
                           scenario: Dict[str, Any], system_prompt: str) -> str:
         """Handle a single proxy turn"""
-        messages_for_proxy = [
-            {"role": "system", "content": "You are the hiring manager. The assistant is the recruiter."}
-        ] + messages + [{"role": "assistant", "content": sut_reply}]
+        # Use existing conversation history; last message should already be the SUT reply
+        messages_for_proxy = self._sanitize_messages_for_proxy(messages)
+        
+        # Build an override system prompt that centralizes behavioral rules
+        override_prompt = self._build_proxy_controller_prompt(persona, scenario, system_prompt)
         
         with self.langfuse_service.start_proxy_span(turn_idx, system_prompt, messages_for_proxy) as proxy_span:
             proxy_reply = self.proxy_client.send_persona_message(
-                persona, scenario, messages_for_proxy
+                persona, scenario, messages_for_proxy, system_prompt_override=override_prompt
             )
             proxy_span.update(output={"text": proxy_reply})
             return proxy_reply
+
+    def _sanitize_messages_for_proxy(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """Remove system-role messages; keep only assistant/user for the proxy."""
+        return [m for m in messages if m.get("role") in {"assistant", "user"}]
+
+    def _build_proxy_controller_prompt(self, persona: Dict[str, Any], scenario: Dict[str, Any], base_prompt: str) -> str:
+        """Centralize proxy behavior controls in simulation layer rather than client code."""
+        controller = (
+            "PROXY CONTROLLER (hard constraints):\n"
+            "- Reply in one sentence when asked a question.\n"
+            "- Do not echo or repeat the assistant's question verbatim.\n"
+            "- Answer directly and concisely based on your persona and scenario context.\n"
+        )
+        # Reuse existing persona/scenario system prompt text
+        return controller + "\n" + base_prompt
     
     def _load_intro_prompt(self) -> str:
         """Load the introductory prompt for the first SUT message"""
@@ -306,7 +333,39 @@ Your capabilities include:
 
 You are warm, professional, and efficient. You ask thoughtful questions to understand hiring needs and provide actionable guidance.
 
-IMPORTANT: For your first message, introduce yourself briefly and ask "How can I help you?" Do not assume any specific role, job title, or make assumptions about what they need. Let them tell you what they're looking for. Do not mention any specific job titles or roles until they tell you what they need."""
+CRITICAL FIRST MESSAGE RULES:
+- Use a brief greeting (one short sentence max).
+- Ask EXACTLY ONE question. No multi-part or follow-up questions.
+- The single question should be: "How can I help you?" (or a close variant).
+- Do not assume any specific role, job title, or needs. Do not mention job titles.
+
+Example (acceptable): "Hi — I’m your recruiter assistant. How can I help you?"
+
+Do not add any second question in the same message.
+"""
+
+    def _enforce_single_question_first_turn(self, text: str) -> str:
+        """Ensure the first SUT message contains at most one question.
+
+        Keeps any brief greeting prior to the first question mark and truncates
+        everything after the first '?'. If no question mark is present, return a
+        minimal compliant message.
+        """
+        try:
+            if not text:
+                return "Hi — how can I help you?"
+            qpos = text.find("?")
+            if qpos == -1:
+                # No question found; replace with compliant first turn
+                return "Hi — how can I help you?"
+            # Include content up to and including the first question mark
+            trimmed = text[: qpos + 1].strip()
+            # Guard against pathologically long greetings
+            if len(trimmed) > 500:
+                return "Hi — how can I help you?"
+            return trimmed
+        except Exception:
+            return "Hi — how can I help you?"
     
     def _load_recruiter_prompt(self) -> str:
         """Load the recruiter system prompt from file"""
@@ -322,7 +381,34 @@ IMPORTANT: For your first message, introduce yourself briefly and ask "How can I
             logger.error(f"Error loading recruiter prompt: {e}")
             return "You are a recruiter assistant. Ask questions to understand the hiring needs and gather information progressively. Do not provide complete job descriptions immediately."
     
+    def _prepend_controller(self, prompt: str) -> str:
+        """Add a compact controller to minimize instruction overload and enforce single-question behavior."""
+        controller = (
+            "DIALOG CONTROLLER (hard constraints):\n"
+            "- Ask EXACTLY ONE question per turn.\n"
+            "- Do not include more than one question mark in a message.\n"
+            "- Keep the message short and avoid multi-part questions.\n"
+            "- If you accidentally start forming a second question, stop and send only the first.\n"
+        )
+        return controller + "\n" + prompt
+    
     def _generate_run_id(self) -> str:
         """Generate unique run ID"""
         import uuid
         return datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S") + f"_run-{uuid.uuid4().hex[:6]}"
+
+    def _enforce_single_question_all_turns(self, text: str) -> str:
+        """Ensure SUT messages contain at most one question (general turns)."""
+        try:
+            if not text:
+                return text
+            # Count question marks; if more than one, trim after the first
+            qpos = text.find("?")
+            if qpos == -1:
+                return text
+            # If there is another question mark after the first, trim
+            if text.find("?", qpos + 1) != -1:
+                return text[: qpos + 1].strip()
+            return text
+        except Exception:
+            return text

@@ -58,6 +58,9 @@ class ProxyClient(BaseAPIClient):
         # Response formula
         if persona.get('response_formula'):
             system_parts.append(f"RESPONSE FORMULA: {persona['response_formula']}")
+            # If persona demands single-sentence replies, add an explicit hard limit
+            if '1 sentence' in persona['response_formula'].lower() or 'one sentence' in persona['response_formula'].lower():
+                system_parts.append("HARD LIMIT: Your replies MUST be a single sentence only. No multi-part answers.")
         
         # Recovery phrase
         if persona.get('recovery_phrase'):
@@ -83,22 +86,42 @@ class ProxyClient(BaseAPIClient):
             system_parts.append("REQUIRED BEHAVIORS (scenario):")
             system_parts.extend(scenario_required)
         
-        # Scenario response formula
-        if scenario.get('response_formula'):
+        # Scenario response formula (only if persona hasn't defined one to avoid conflicts)
+        if scenario.get('response_formula') and not persona.get('response_formula'):
             system_parts.append(f"RESPONSE FORMULA (scenario): {scenario['response_formula']}")
         
-        # Scenario recovery phrase
-        if scenario.get('recovery_phrase'):
+        # Scenario recovery phrase — suppress if persona already defines one
+        if scenario.get('recovery_phrase') and not persona.get('recovery_phrase'):
             system_parts.append(f"RECOVERY PHRASE (scenario): {scenario['recovery_phrase']}")
         
         # Scenario character motivation
         if scenario.get('character_motivation'):
             system_parts.append(f"CHARACTER MOTIVATION (scenario): {scenario['character_motivation']}")
+
+        # Scenario grounding: title and entry context to avoid drift
+        title = scenario.get('title')
+        entry = scenario.get('entry_context')
+        if title or entry:
+            system_parts.append("SCENARIO CONTEXT (for grounding, do not repeat verbatim):")
+            if title:
+                system_parts.append(f"- Title: {title}")
+            if entry:
+                system_parts.append(f"- Entry context: {entry.strip()}")
+            # Explicit constraint to prevent role drift
+            system_parts.append(
+                "Respond in one natural sentence. Align with the scenario context; do not invent a different role title."
+            )
+            system_parts.append(
+                "If greeted with 'How can I help you?', state your hiring need from the entry context succinctly."
+            )
+            system_parts.append(
+                "Never mirror or repeat the assistant's question verbatim; answer directly and concisely."
+            )
         
         return "\n".join(system_parts)
     
     def send_persona_message(self, persona: Dict[str, Any], scenario: Dict[str, Any], 
-                           messages: List[Dict[str, str]]) -> str:
+                           messages: List[Dict[str, str]], system_prompt_override: str | None = None) -> str:
         """
         Send persona message through proxy API
         
@@ -110,15 +133,25 @@ class ProxyClient(BaseAPIClient):
         Returns:
             Persona response content
         """
-        # Build system prompt
-        system_prompt = self._build_persona_system_prompt(persona, scenario)
+        # Build system prompt (allow override from simulation layer)
+        system_prompt = system_prompt_override or self._build_persona_system_prompt(persona, scenario)
+        
+        # Defense-in-depth: ensure we only send ONE system message total
+        cleaned_messages = [m for m in messages if m.get("role") != "system"]
+        
+        # Capture last assistant message for anti-echo sanitization
+        last_assistant = None
+        for m in reversed(cleaned_messages):
+            if m.get("role") == "assistant":
+                last_assistant = (m.get("content") or "").strip()
+                break
         
         # Prepare payload for proxy API
         payload = {
             "model": self.config.model or "gpt-4o-mini",
             "messages": [
                 {"role": "system", "content": system_prompt}
-            ] + messages
+            ] + cleaned_messages
         }
         
         logger.info(f"Sending persona message through proxy API with {len(messages)} messages")
@@ -132,3 +165,22 @@ class ProxyClient(BaseAPIClient):
         except Exception as e:
             logger.error(f"Proxy request failed: {e}")
             raise
+
+
+    def _enforce_single_sentence(self, text: str) -> str:
+        """Trim reply to a single sentence for brevity and consistency."""
+        s = text.strip()
+        if not s:
+            return s
+        # Find first terminal punctuation. Prefer '?', '!' or '.'
+        first_q = s.find('?') if '?' in s else -1
+        first_e = s.find('!') if '!' in s else -1
+        first_p = s.find('.') if '.' in s else -1
+
+        candidates = [idx for idx in [first_q, first_e, first_p] if idx != -1]
+        if not candidates:
+            # No clear sentence boundary; return as-is but cap length
+            return s[:240]
+        end = min(candidates)
+        single = s[: end + 1].strip()
+        return single

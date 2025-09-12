@@ -1,6 +1,6 @@
 title: Senior Backend Engineer (Scale)
 entry_context: |
-  I am Alex Smith, Tech Department Leader at an established IT company in San Francisco. I need to hire a Senior Backend Engineer for my team. The process has been slow and challenging, and I want to find a high-quality candidate quickly. I'm looking for help from a recruiter assistant to define the role, clarify requirements, and streamline the hiring process.
+  Hey, I'm Alex. We really need to hire a senior backend engineer and I'm hoping you can help speed this up. We're pretty swamped right now.
 challenges:
   - Finding candidates with the right technical depth and experience.
   - Avoiding slow, agency-driven processes that lack technical understanding.
@@ -18,7 +18,7 @@ role_adherence: |
 forbidden_behaviors:
   - Never ask "Could you elaborate on..."
   - Never ask "What is the..." or "How many..."
-  - Never mirror the System's questions
+  - Never mirror or repeat the assistant's question verbatim
   - Never act professional or detached
 required_behaviors:
   - Express frustration about slow hiring
