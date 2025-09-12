@@ -264,11 +264,7 @@ def simulate(args):
         # Set comprehensive tags for filtering and grouping
         lf.update_current_trace(tags=[
             persona["name"], 
-            scenario["title"],
-            "simulation",
-            f"persona-{persona['name'].lower().replace(' ', '-')}",
-            f"scenario-{scenario['title'].lower().replace(' ', '-')}",
-            persona["role"]
+            scenario["title"]
         ])
         for turn_idx in range(max_turns):
             # SUT reply
