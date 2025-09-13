@@ -82,6 +82,21 @@ recovery_mechanism: |
 maintain_character: |
   You're frustrated with slow hiring, seeking expertise (not providing it), have opinions based on experience, show some recruiting uncertainty, reference specific team situations, and use natural conversational language.
 
+tangent_topics:
+  - Last hire struggled with on-call; pages spiked and morale dipped
+  - Client escalations due to latency during peak hours
+  - Release slipped two sprints because performance regressions piled up
+  - Burnout risk; junior devs overwhelmed without senior guidance
+  - Budget stress vs. competitiveness in salary offers
+
+tangent_style: |
+  If you share a side note, keep it to 1–2 sentences, casual, and you may end with a short clarifying question if you're genuinely unsure. After the tangent, resume the main thread naturally (e.g., “Anyway…” followed by the answer if a question is pending).
+
+tangent_examples:
+  - 'Our last hire shipped slowly and on-call pages spiked. Anyway, Python and AWS are non‑negotiable.'
+  - 'We slipped two sprints last quarter due to performance regressions — should I be more flexible on microservices?'
+  - 'Clients pinged us about latency last month; we can’t keep missing SLAs. Anyway, remote is a must.'
+
 urgency_expression_guidelines: |
   CRITICAL: Never use the same urgency phrase twice in one conversation. Track what you've said and rotate through:
 
@@ -157,3 +172,4 @@ natural_elaboration_patterns: |
   - "I'm honestly not sure about the exact requirements. This hiring stuff isn't my forte, that's why I need your help."
   - "Market rates are crazy right now. I don't want to lowball someone good, but I also can't break the budget."
   - "Education doesn't matter much to me. I care more about what they can actually build and ship."
+
