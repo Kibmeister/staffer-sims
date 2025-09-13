@@ -3,6 +3,7 @@ Simulation Engine
 Main orchestrator for persona simulation conversations
 """
 import os
+import re
 import json
 import logging
 from datetime import datetime
@@ -86,13 +87,24 @@ class SimulationEngine:
         """
         os.makedirs(output_dir, exist_ok=True)
         
+        # Build safe filename parts including persona and scenario
+        def _slugify(value: str) -> str:
+            value = value.strip().lower()
+            value = re.sub(r"[\s]+", "-", value)
+            value = re.sub(r"[^a-z0-9_-]", "", value)
+            return value
+
+        persona_slug = _slugify(str(persona.get("name", "persona")))
+        scenario_slug = _slugify(str(scenario.get("title", "scenario")))
+        base_name = f"{run_id}__{persona_slug}__{scenario_slug}"
+
         # Save markdown
-        md_path = os.path.join(output_dir, f"{run_id}.md")
+        md_path = os.path.join(output_dir, f"{base_name}.md")
         with open(md_path, "w") as f:
             f.write(self._to_markdown(run_id, persona, scenario, turns))
         
         # Save JSONL
-        jsonl_path = os.path.join(output_dir, f"{run_id}.jsonl")
+        jsonl_path = os.path.join(output_dir, f"{base_name}.jsonl")
         with open(jsonl_path, "w") as f:
             for turn in turns:
                 f.write(json.dumps(turn, ensure_ascii=False) + "\n")
@@ -369,10 +381,10 @@ Do not add any second question in the same message.
     def _generate_run_id(self) -> str:
         """Generate unique run ID"""
         import uuid
-        # Use 24h clock + day/month/year in a file-system safe format
+        # Use LOCAL time (24h) + day/month/year in a file-system safe format
         # Desired human format would be "HH:mm dd/MM/yyyy", but ":" and "/" are unsafe in filenames.
         # We therefore map to "HH-mm_dd-MM-yyyy" while preserving the same information.
-        return datetime.utcnow().strftime("%H-%M_%d-%m-%Y") + f"_run-{uuid.uuid4().hex[:6]}"
+        return datetime.now().strftime("%H-%M_%d-%m-%Y") + f"_run-{uuid.uuid4().hex[:6]}"
 
     def _enforce_single_question_all_turns(self, text: str) -> str:
         """Ensure SUT messages contain at most one question (general turns)."""
