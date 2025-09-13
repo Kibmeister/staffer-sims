@@ -369,7 +369,10 @@ Do not add any second question in the same message.
     def _generate_run_id(self) -> str:
         """Generate unique run ID"""
         import uuid
-        return datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S") + f"_run-{uuid.uuid4().hex[:6]}"
+        # Use 24h clock + day/month/year in a file-system safe format
+        # Desired human format would be "HH:mm dd/MM/yyyy", but ":" and "/" are unsafe in filenames.
+        # We therefore map to "HH-mm_dd-MM-yyyy" while preserving the same information.
+        return datetime.utcnow().strftime("%H-%M_%d-%m-%Y") + f"_run-{uuid.uuid4().hex[:6]}"
 
     def _enforce_single_question_all_turns(self, text: str) -> str:
         """Ensure SUT messages contain at most one question (general turns)."""
