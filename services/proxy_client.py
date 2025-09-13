@@ -121,6 +121,11 @@ class ProxyClient(BaseAPIClient):
             system_parts.append(
                 "Never mirror or repeat the assistant's question verbatim; answer directly and concisely."
             )
+
+        # Interaction contract: engine-computed runtime rules and dials
+        contract = scenario.get('interaction_contract')
+        if contract:
+            system_parts.append(contract)
         
         return "\n".join(system_parts)
     

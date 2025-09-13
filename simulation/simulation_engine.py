@@ -146,6 +146,11 @@ class SimulationEngine:
         
         logger.info(f"Starting simulation {run_id} with {max_turns} max turns")
         
+        # Compute and attach run-time behavior dials and interaction contract
+        dials, seed = self._compute_runtime_dials(persona, scenario)
+        scenario = dict(scenario)
+        scenario["interaction_contract"] = self._build_interaction_contract(persona, scenario, dials, seed)
+
         # Initialize conversation - start with empty messages; SUT will make first message
         messages = []
         turns = []
@@ -159,7 +164,11 @@ class SimulationEngine:
             # Set trace tags
             self.langfuse_service.update_trace_tags([
                 persona["name"], 
-                scenario["title"]
+                scenario["title"],
+                f"seed:{seed}",
+                f"clarify:{dials['clarifying_question_prob']:.2f}",
+                f"tangent:{dials['tangent_prob_after_field']:.2f}",
+                f"hesitation:{dials['hesitation_insert_prob']:.2f}"
             ])
             
             # Main conversation loop
@@ -401,3 +410,96 @@ Do not add any second question in the same message.
             return text
         except Exception:
             return text
+
+    # ------------------------------
+    # Runtime dials & contract
+    # ------------------------------
+    def _compute_runtime_dials(self, persona: Dict[str, Any], scenario: Dict[str, Any]) -> tuple[Dict[str, float], int]:
+        """Compute behavior dials per run using persona + scenario.
+
+        Returns a tuple of (dials dict, randomness seed int).
+        """
+        import uuid
+
+        def _val_or_default(container: Dict[str, Any], path: List[str], default: float) -> float:
+            cur: Any = container
+            try:
+                for key in path:
+                    cur = cur.get(key, {}) if isinstance(cur, dict) else {}
+                return float(cur) if isinstance(cur, (int, float)) else default
+            except Exception:
+                return default
+
+        # Pressure index mapping
+        level_to_num = {"high": 1.0, "medium": 0.7, "low": 0.4}
+        pi: Dict[str, Any] = scenario.get("pressure_index", {}) or {}
+        if isinstance(pi, dict):
+            vals: List[float] = [level_to_num.get(str(pi.get(k, "medium")).lower(), 0.7) for k in ["timeline", "quality", "budget"]]
+            pressure_avg = sum(vals) / len(vals) if vals else 0.7
+            budget_factor = level_to_num.get(str(pi.get("budget", "medium")).lower(), 0.7)
+        else:
+            pressure_avg = 0.7
+            budget_factor = 0.7
+
+        # Persona propensities
+        question_uncertain = (
+            persona.get("behavior_dials", {})
+                   .get("question_propensity", {})
+                   .get("when_uncertain", 0.6)
+        )
+        question_budget = (
+            persona.get("behavior_dials", {})
+                   .get("question_propensity", {})
+                   .get("when_budget", 0.5)
+        )
+        tangent_after_field = (
+            persona.get("behavior_dials", {})
+                   .get("tangent_propensity", {})
+                   .get("after_field_capture", 0.3)
+        )
+        elaboration_two = (
+            persona.get("behavior_dials", {})
+                   .get("elaboration_distribution", {})
+                   .get("two_sentences", 0.25)
+        )
+
+        # Combine into runtime dials
+        def clamp01(x: float) -> float:
+            return max(0.0, min(1.0, x))
+
+        clarifying_prob = clamp01(question_uncertain * pressure_avg * 1.0)
+        # Slightly boost if budget pressure is high
+        clarifying_prob = clamp01(clarifying_prob * (0.9 + 0.2 * budget_factor))
+
+        tangent_prob = clamp01(tangent_after_field * min(1.0, pressure_avg))
+        hesitation_prob = clamp01(float(elaboration_two))
+
+        seed = int(uuid.uuid4().hex[:8], 16)
+
+        dials = {
+            "clarifying_question_prob": round(clarifying_prob, 3),
+            "tangent_prob_after_field": round(tangent_prob, 3),
+            "hesitation_insert_prob": round(hesitation_prob, 3)
+        }
+        return dials, seed
+
+    def _build_interaction_contract(self, persona: Dict[str, Any], scenario: Dict[str, Any], dials: Dict[str, float], seed: int) -> str:
+        """Create a compact interaction contract block for the proxy system prompt."""
+        patterns = persona.get("behavior_dials", {}).get("hesitation_patterns", []) or []
+        patterns_str = ", ".join([str(p) for p in patterns]) if patterns else "Hmm…, Honestly…, Let me think…"
+
+        parts: List[str] = [
+            "INTERACTION CONTRACT (engine-controlled):",
+            "PRIORITIES:",
+            "1) mandatory_fields (answer recruiter; provide the requested field)",
+            "2) consultative_questions (only after fields are provided)",
+            "3) tangent_handling (micro-detours max 1 every 3–4 turns; resume last question)",
+            "4) closure_policy (when recruiter summarizes, confirm succinctly)",
+            "BEHAVIOR DIALS:",
+            f"- clarifying_question_prob: {dials['clarifying_question_prob']}",
+            f"- tangent_prob_after_field: {dials['tangent_prob_after_field']}",
+            f"- hesitation_insert_prob: {dials['hesitation_insert_prob']}",
+            f"- randomness_seed: {seed}",
+            f"HESITATION PATTERNS: {patterns_str}"
+        ]
+        return "\n".join(parts)

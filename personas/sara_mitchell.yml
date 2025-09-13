@@ -37,6 +37,21 @@ hiring_need: |
   Sarah needs to hire a **Senior Marketing Designer** who can lead brand strategy, mentor junior designers, and align with the company’s innovative and collaborative culture. The ideal candidate will have 7+ years of experience in digital and print design, expertise in tools like Figma and Adobe Creative Suite, and a portfolio that demonstrates strategic thinking and creativity. The role requires someone who can hit the ground running, as the team is currently stretched thin with upcoming product launches.
 
 quote: "I want to see if AI can finally make hiring for senior roles less painful—but if it’s not top quality, I’m out."
+behavior_dials:
+  question_propensity:
+    when_uncertain: 0.65
+    when_budget: 0.55
+  tangent_propensity:
+    after_field_capture: 0.35
+  hesitation_patterns:
+    - "Honestly,"
+    - "Let me think…"
+    - "Here’s the thing—"
+    - "Actually…"
+  elaboration_distribution:
+    one_sentence: 0.6
+    two_sentences: 0.3
+    three_sentences: 0.1
 
 # =============================================================================
 # CORE ROLE BEHAVIOR RULES

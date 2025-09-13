@@ -32,10 +32,11 @@ staffer-sims/
 │   └── langfuse_service.py        # Langfuse observability integration
 ├── simulation/            # Core simulation engine
 │   └── simulation_engine.py       # Orchestrates conversation flow
-├── personas/              # Hiring manager personas
-│   └── alex_smith.yml             # Example hiring manager profile
-├── scenarios/             # Job scenarios and requirements
-│   └── senior_backend_engineer.yml # Example job scenario
+├── personas/              # Hiring manager personas (decoupled from scenarios)
+│   ├── alex_smith.yml             # Persona with behavior dials
+│   └── sara_mitchell.yml          # Persona with behavior dials
+├── scenarios/             # Situational constraints and objectives
+│   └── referralCrisis_seniorBackendEngineer.yml # Example job scenario with contract fields
 ├── prompts/               # System prompts and templates
 │   └── recruiter_v1.txt           # Recruiter assistant system prompt
 └── output/                # Simulation results and transcripts
@@ -88,13 +89,13 @@ staffer-sims/
 **Basic simulation:**
 
 ```bash
-python simulate.py --persona personas/alex_smith.yml --scenario scenarios/senior_backend_engineer.yml
+python simulate.py --persona personas/alex_smith.yml --scenario scenarios/referralCrisis_seniorBackendEngineer.yml
 ```
 
 **With custom output directory:**
 
 ```bash
-python simulate.py --persona personas/alex_smith.yml --scenario scenarios/senior_backend_engineer.yml --output my_results
+python simulate.py --persona personas/alex_smith.yml --scenario scenarios/referralCrisis_seniorBackendEngineer.yml --output my_results
 ```
 
 ## ⚙️ Configuration
@@ -156,6 +157,12 @@ Pre-configured hiring manager personas with:
 - Specific pain points and hiring challenges
 - Behavioral patterns and response formulas
 - Role adherence mechanisms
+- Behavior dials (runtime-controllable):
+  - `question_propensity`: `{ when_uncertain: float, when_budget: float }`
+  - `tangent_propensity`: `{ after_field_capture: float }`
+  - `hesitation_patterns`: `string[]`
+  - `elaboration_distribution`: `{ one_sentence: float, two_sentences: float, three_sentences: float }`
+  - Optional: `topic_preferences`: `string[]`
 
 ### 📈 Comprehensive Analytics
 
@@ -163,6 +170,10 @@ Pre-configured hiring manager personas with:
 - **Information Extraction**: Automatically extract job details, requirements, and preferences
 - **Outcome Assessment**: Evaluate conversation completion and success metrics
 - **Langfuse Integration**: Full observability with traces, spans, and evaluations
+  - Trace tags now include:
+    - `persona`, `scenario`
+    - `seed:<int>`
+    - `clarify:<0-1>`, `tangent:<0-1>`, `hesitation:<0-1>`
 
 ### 🔧 Flexible API Integration
 
@@ -184,8 +195,8 @@ Support for multiple API providers:
 
 ### Configuration Files
 
-- **`personas/*.yml`**: Hiring manager personas with detailed behavioral specifications
-- **`scenarios/*.yml`**: Job scenarios defining requirements and context
+- **`personas/*.yml`**: Hiring manager personas with detailed behavioral specifications and behavior dials
+- **`scenarios/*.yml`**: Job scenarios defining requirements, context, and interaction contract fields
 - **`prompts/recruiter_v1.txt`**: System prompt for recruiter assistant behavior
 
 ### Output Files
@@ -233,6 +244,21 @@ needs_goals:
 pain_points:
   - Previous hires lacked technical marketing skills
   - Need someone who can scale our marketing efforts
+
+# Behavior dials (engine reads these at runtime)
+behavior_dials:
+  question_propensity:
+    when_uncertain: 0.6
+    when_budget: 0.5
+  tangent_propensity:
+    after_field_capture: 0.3
+  hesitation_patterns:
+    - 'Honestly,'
+    - 'Let me think…'
+  elaboration_distribution:
+    one_sentence: 0.7
+    two_sentences: 0.25
+    three_sentences: 0.05
 ```
 
 ### Adding New Scenarios
@@ -248,6 +274,23 @@ challenges:
 requirements:
   - 3+ years digital marketing experience
   - Experience with growth marketing
+
+# Contract fields used by the engine to build an interaction contract
+pressure_index:
+  timeline: high
+  quality: medium
+  budget: medium
+must_hit_metrics:
+  - 'p95_latency<=250ms'
+  - 'deploys/week>=2'
+consultative_topics:
+  - 'hire vs perfect_fit tradeoff'
+  - 'market_rate guidance'
+success_criteria:
+  - 'all mandatory fields captured'
+  - 'proxy confirms summary'
+  - 'closure message'
+
 goal: Hire a Marketing Manager who can drive user acquisition
 ```
 
@@ -258,6 +301,22 @@ The system automatically reads mandatory fields from `prompts/recruiter_v1.txt`.
 1. Update the recruiter prompt with new mandatory fields
 2. The analyzer will automatically detect and extract them
 3. No code changes required
+
+### How Runtime Dials Work
+
+At run start, the engine computes behavior dials from `persona.behavior_dials` × `scenario.pressure_index`:
+
+- `clarifying_question_prob = persona.question_propensity.when_uncertain × avg(pressure_index)` (budget boosts slightly)
+- `tangent_prob_after_field = persona.tangent_propensity.after_field_capture × min(1, avg(pressure_index))`
+- `hesitation_insert_prob = persona.elaboration_distribution.two_sentences`
+
+The engine injects an `INTERACTION CONTRACT` block into the proxy system prompt containing:
+
+- Priorities (fields → consultative → tangents → closure)
+- Behavior dials with values
+- A `randomness_seed` for reproducibility
+
+Langfuse tags include `seed` and dial values for observability.
 
 ## 📋 Dependencies
 
