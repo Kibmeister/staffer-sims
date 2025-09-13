@@ -52,6 +52,22 @@ def simulate(args):
     
     # Run simulation
     output_dir = getattr(args, 'output', None) or settings.output_dir
+    # Inject RNG seed override if provided via CLI or env-backed settings
+    if getattr(args, 'seed', None) is not None:
+        scenario = dict(scenario)
+        scenario['rng_seed_override'] = int(args.seed)
+    elif settings.rng_seed is not None:
+        scenario = dict(scenario)
+        scenario['rng_seed_override'] = int(settings.rng_seed)
+
+    # Allow temperature/top_p overrides
+    if getattr(args, 'temperature', None) is not None:
+        scenario = dict(scenario)
+        scenario['temperature_override'] = float(args.temperature)
+    if getattr(args, 'top_p', None) is not None:
+        scenario = dict(scenario)
+        scenario['top_p_override'] = float(args.top_p)
+
     results = engine.run_simulation(persona, scenario, output_dir)
     
     # Print results summary
@@ -69,5 +85,8 @@ if __name__ == "__main__":
     parser.add_argument("--persona", required=True, help="Path to persona YAML file")
     parser.add_argument("--scenario", required=True, help="Path to scenario YAML file")
     parser.add_argument("--output", default="output", help="Output directory for transcripts")
+    parser.add_argument("--seed", type=int, help="Deterministic RNG seed for per-turn decisions")
+    parser.add_argument("--temperature", type=float, help="Sampling temperature (e.g., 0.0..1.2)")
+    parser.add_argument("--top_p", type=float, help="Nucleus sampling top_p (0..1)")
     args = parser.parse_args()
     simulate(args)

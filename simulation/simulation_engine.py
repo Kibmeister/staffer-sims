@@ -147,9 +147,14 @@ class SimulationEngine:
         logger.info(f"Starting simulation {run_id} with {max_turns} max turns")
         
         # Compute and attach run-time behavior dials and interaction contract
+        # Allow seed override from scenario (CLI/env)
+        seed_override = scenario.get("rng_seed_override")
         dials, seed = self._compute_runtime_dials(persona, scenario)
+        if isinstance(seed_override, int):
+            seed = seed_override
         scenario = dict(scenario)
         scenario["interaction_contract"] = self._build_interaction_contract(persona, scenario, dials, seed)
+        scenario["rng_seed"] = seed
 
         # Initialize conversation - start with empty messages; SUT will make first message
         messages = []
@@ -182,7 +187,9 @@ class SimulationEngine:
                 logger.debug(f"Starting turn {turn_idx + 1}")
                 
                 # SUT turn: Generate SUT response
-                sut_reply = self._handle_sut_turn(turn_idx, messages, persona_system_prompt)
+                sut_reply = self._handle_sut_turn(turn_idx, messages, persona_system_prompt,
+                                                temperature=scenario.get('temperature_override'),
+                                                top_p=scenario.get('top_p_override'))
                 turns.append({"role": "system", "content": sut_reply})
                 messages.append({"role": "assistant", "content": sut_reply})
                 
@@ -195,13 +202,14 @@ class SimulationEngine:
                 fields_captured = self._update_fields_captured(fields_captured, sut_reply)
 
                 # Build per-turn controller
-                controller_text = self._build_turn_controller(
+                controller_text, tangent_decision = self._build_turn_controller(
                     turn_idx,
                     sut_reply,
                     fields_captured,
                     last_tangent_turn,
                     tangent_cooldown_turns,
-                    scenario.get("interaction_contract", "")
+                    scenario.get("interaction_contract", ""),
+                    scenario.get("rng_seed")
                 )
                 # Attach to scenario for this turn
                 scenario_turn = dict(scenario)
@@ -219,7 +227,7 @@ class SimulationEngine:
                     break
 
                 # If a tangent appears to have occurred, update last_tangent_turn
-                if self._detect_tangent(proxy_reply):
+                if tangent_decision or self._detect_tangent(proxy_reply):
                     last_tangent_turn = turn_idx
             
             # Save transcript
@@ -285,7 +293,7 @@ class SimulationEngine:
             return results
     
     def _handle_sut_turn(self, turn_idx: int, messages: List[Dict[str, str]], 
-                        system_prompt: str) -> str:
+                        system_prompt: str, temperature: float | None = None, top_p: float | None = None) -> str:
         """Handle a single SUT turn"""
         # For the first turn, use a special introductory prompt
         if turn_idx == 0:
@@ -303,7 +311,7 @@ class SimulationEngine:
         ] + messages
         
         with self.langfuse_service.start_sut_span(turn_idx, messages_for_sut) as sut_span:
-            sut_reply = self.sut_client.send_conversation(messages_for_sut)
+            sut_reply = self.sut_client.send_conversation(messages_for_sut, temperature=temperature, top_p=top_p)
             # Enforce one-question-only where appropriate
             is_summary = self.analyzer.check_sut_provided_summary(sut_reply)
             if not is_summary:
@@ -574,8 +582,12 @@ Do not add any second question in the same message.
         last_tangent_turn: int,
         tangent_cooldown_turns: int,
         contract: str,
-    ) -> str:
-        """Create a compact controller block for this turn using scenario dials embedded in contract text."""
+        seed: int,
+    ) -> tuple[str, bool]:
+        """Create a compact controller block for this turn using scenario dials embedded in contract text.
+
+        Returns (controller_text, tangent_decision_bool)
+        """
         # Extract dials from the contract text (simple regex fallback)
         import re
 
@@ -591,22 +603,44 @@ Do not add any second question in the same message.
         clar_prob = _extract_float("clarifying_question_prob", 0.4)
         tangent_prob = _extract_float("tangent_prob_after_field", 0.2)
 
-        # Determine if a field was just captured (based on SUT reply containing field labels)
-        field_just_captured = any(v for v in fields_captured.values())
+        # Determine if a field was just captured this turn by diffing keys mentioned in this SUT reply
+        field_just_captured = False
+        try:
+            text = (sut_reply or "").lower()
+            for _, label in self.analyzer.mandatory_fields.items():
+                label_lower = label.lower().rstrip(":")
+                if f"{label_lower}:" in text:
+                    field_just_captured = True
+                    break
+        except Exception:
+            field_just_captured = False
 
-        # Clarifying allowed if uncertainty in prior content AND probabilistic roll below threshold
-        # We cannot roll here deterministically without RNG; instead, we inform the proxy with probability guidance.
-        clarifying_allowed = "maybe"
+        # Seeded RNG for decisions
+        def _rand_01(seed_val: int, turn: int, kind: str) -> float:
+            import hashlib
+            payload = f"{seed_val}:{turn}:{kind}".encode("utf-8")
+            h = hashlib.sha256(payload).hexdigest()
+            # Take first 8 hex chars => 32 bits => int, map to [0,1)
+            n = int(h[:8], 16)
+            return (n % 10_000_000) / 10_000_000.0
+
+        # Clarifying allowed only when uncertainty detected in prior proxy content; since we cannot
+        # inspect future proxy text, we gate via roll here and communicate YES/NO with threshold.
+        clar_roll = _rand_01(seed or 0, turn_idx, "clarify")
+        clarifying_allowed = "yes" if clar_roll < clar_prob else "no"
 
         # Tangent allowed only if cooldown elapsed and a field was just captured
         cooldown_remaining = max(0, (last_tangent_turn + tangent_cooldown_turns) - turn_idx)
-        tangent_allowed = "yes" if (cooldown_remaining <= 0 and field_just_captured) else "no"
+        tangent_gate = (cooldown_remaining <= 0 and field_just_captured)
+        tangent_roll = _rand_01(seed or 0, turn_idx, "tangent") if tangent_gate else 1.0
+        tangent_decision = tangent_gate and (tangent_roll < tangent_prob)
+        tangent_allowed = "yes" if tangent_decision else "no"
 
         lines = [
             "TURN CONTROLLER:",
-            f"- clarifying_allowed: {clarifying_allowed} (rule: only if uncertainty phrase; use prob <= {clar_prob:.2f})",
-            f"- tangent_allowed: {tangent_allowed} (cooldown: {cooldown_remaining} turns)",
+            f"- clarifying_allowed: {clarifying_allowed} (roll: {clar_roll:.2f} < {clar_prob:.2f} if uncertainty phrase)",
+            f"- tangent_allowed: {tangent_allowed} (roll: {tangent_roll:.2f} < {tangent_prob:.2f}; cooldown: {cooldown_remaining}; field_just_captured: {str(field_just_captured).lower()})",
             "- on_summary: confirm succinctly with approved closure phrasing",
             "- resume_policy: after any tangent, answer the recruiter's last question directly",
         ]
-        return "\n".join(lines)
+        return "\n".join(lines), tangent_decision

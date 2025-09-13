@@ -318,6 +318,71 @@ The engine injects an `INTERACTION CONTRACT` block into the proxy system prompt 
 
 Langfuse tags include `seed` and dial values for observability.
 
+### Deterministic RNG and per-turn decisions
+
+The engine uses a seeded RNG to turn dials into reproducible yes/no decisions per turn:
+
+- rng_seed: Generated once per run; attached to the scenario and logged to Langfuse as `seed:<int>`.
+- Clarifying decision:
+  - Draw r = hash(rng_seed, turn_idx, "clarify") ∈ [0,1).
+  - Allow only if (uncertainty phrase detected) AND r < `clarifying_question_prob`.
+- Tangent decision:
+  - Draw r = hash(rng_seed, turn_idx, "tangent") ∈ [0,1).
+  - Allow only if (a field was just captured this turn) AND (cooldown elapsed) AND r < `tangent_prob_after_field`.
+- Hesitation: Guided by `hesitation_insert_prob`; used as a soft prompt cue.
+
+The engine emits a per‑turn `TURN CONTROLLER` block appended to the proxy system prompt, e.g.:
+
+```text
+TURN CONTROLLER:
+- clarifying_allowed: yes (roll: 0.42 < 0.58 if uncertainty phrase)
+- tangent_allowed: no (roll: 0.77 < 0.30; cooldown: 2; field_just_captured: false)
+- on_summary: confirm succinctly with approved closure phrasing
+- resume_policy: after any tangent, answer the recruiter's last question directly
+```
+
+Reproducibility: Same persona + scenario + dials + seed ⇒ identical decisions. Changing only the seed explores different, statistically consistent human behaviors.
+
+### Fixing the seed across runs
+
+You can force a specific seed via either CLI or environment:
+
+- CLI:
+  ```bash
+  python simulate.py --persona personas/alex_smith.yml \
+    --scenario scenarios/referralCrisis_seniorBackendEngineer.yml \
+    --seed 12345678
+  ```
+- Environment (useful for CI):
+  ```bash
+  export RNG_SEED=12345678
+  python simulate.py --persona personas/alex_smith.yml --scenario scenarios/referralCrisis_seniorBackendEngineer.yml
+  ```
+
+CLI flag takes precedence over the environment variable.
+
+### Adjusting temperature and top_p
+
+Control sampling for reproducibility vs creativity:
+
+- CLI:
+  ```bash
+  python simulate.py --persona personas/alex_smith.yml \
+    --scenario scenarios/referralCrisis_seniorBackendEngineer.yml \
+    --seed 12345678 --temperature 0.0 --top_p 1.0
+  ```
+- Environment:
+  ```bash
+  export TEMPERATURE=0.0
+  export TOP_P=1.0
+  python simulate.py --persona personas/alex_smith.yml --scenario scenarios/referralCrisis_seniorBackendEngineer.yml
+  ```
+
+Notes:
+
+- T=0.0 & top_p=1.0 → deterministic wording (given the same seed and prompts).
+- Raise T (e.g., 0.3–0.7) for more natural variation in phrasing.
+
 ## 📋 Dependencies
 
 ### Core Dependencies

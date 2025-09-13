@@ -167,6 +167,24 @@ class ProxyClient(BaseAPIClient):
                 {"role": "system", "content": system_prompt}
             ] + cleaned_messages
         }
+
+        # Sampling controls (temperature/top_p): prefer scenario overrides, then settings/env
+        try:
+            temp_override = scenario.get('temperature_override')
+            top_p_override = scenario.get('top_p_override')
+            if temp_override is not None:
+                payload["temperature"] = float(temp_override)
+            if top_p_override is not None:
+                payload["top_p"] = float(top_p_override)
+            if temp_override is None or top_p_override is None:
+                from config.settings import get_settings
+                settings = get_settings()
+                if temp_override is None:
+                    payload["temperature"] = settings.temperature
+                if top_p_override is None:
+                    payload["top_p"] = settings.top_p
+        except Exception:
+            pass
         
         logger.info(f"Sending persona message through proxy API with {len(messages)} messages")
         logger.debug(f"System prompt length: {len(system_prompt)}")

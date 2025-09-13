@@ -33,6 +33,11 @@ class Settings:
     request_timeout: int = 120
     retry_attempts: int = 3
     retry_delay: float = 1.0
+
+    # Simulation Behavior
+    rng_seed: Optional[int] = None
+    temperature: float = 0.7
+    top_p: float = 1.0
     
     # File Paths
     output_dir: str = "output"
@@ -109,6 +114,11 @@ class Settings:
             request_timeout=int(os.getenv("REQUEST_TIMEOUT", "120")),
             retry_attempts=int(os.getenv("RETRY_ATTEMPTS", "3")),
             retry_delay=float(os.getenv("RETRY_DELAY", "1.0")),
+            
+            # Simulation Behavior
+            rng_seed=int(os.getenv("RNG_SEED", "0")) if os.getenv("RNG_SEED") else None,
+            temperature=float(os.getenv("TEMPERATURE", "0.7")),
+            top_p=float(os.getenv("TOP_P", "1.0")),
             
             # File Paths
             output_dir=os.getenv("OUTPUT_DIR", "output"),

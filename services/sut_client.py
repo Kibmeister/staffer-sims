@@ -32,7 +32,7 @@ class SUTClient(BaseAPIClient):
         logger.error(f"SUT response missing expected keys: {response_data}")
         raise ValueError("SUT response missing 'message' or 'choices[0][\"message\"][\"content\"]' key")
     
-    def send_conversation(self, messages: List[Dict[str, str]]) -> str:
+    def send_conversation(self, messages: List[Dict[str, str]], temperature: float | None = None, top_p: float | None = None) -> str:
         """
         Send conversation to SUT endpoint
         
@@ -48,6 +48,13 @@ class SUTClient(BaseAPIClient):
         # Add model if configured (for OpenRouter/OpenAI APIs)
         if self.config.model:
             payload["model"] = self.config.model
+        # Optional sampling controls; CLI/env overrides take precedence
+        if temperature is None:
+            temperature = self._get_temperature_default()
+        if top_p is None:
+            top_p = self._get_top_p_default()
+        payload["temperature"] = float(temperature)
+        payload["top_p"] = float(top_p)
         
         logger.info(f"Sending conversation to SUT with {len(messages)} messages")
         logger.debug(f"SUT payload: {payload}")
@@ -60,7 +67,7 @@ class SUTClient(BaseAPIClient):
             logger.error(f"SUT request failed: {e}")
             raise
     
-    def send_with_system_prompt(self, messages: List[Dict[str, str]], system_prompt: str) -> str:
+    def send_with_system_prompt(self, messages: List[Dict[str, str]], system_prompt: str, temperature: float | None = None, top_p: float | None = None) -> str:
         """
         Send conversation with system prompt to SUT
         
@@ -76,4 +83,19 @@ class SUTClient(BaseAPIClient):
             {"role": "system", "content": system_prompt}
         ] + messages
         
-        return self.send_conversation(messages_with_system)
+        return self.send_conversation(messages_with_system, temperature=temperature, top_p=top_p)
+
+    def _get_temperature_default(self) -> float:
+        # Pull from env-driven settings if present via headers; fallback default 0.7
+        try:
+            from config.settings import get_settings
+            return float(get_settings().temperature)
+        except Exception:
+            return 0.7
+
+    def _get_top_p_default(self) -> float:
+        try:
+            from config.settings import get_settings
+            return float(get_settings().top_p)
+        except Exception:
+            return 1.0
