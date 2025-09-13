@@ -173,6 +173,10 @@ class SimulationEngine:
             
             # Main conversation loop
             sut_provided_summary = False
+            # Turn-controller state
+            fields_captured: Dict[str, bool] = {k: False for k in self.analyzer.mandatory_fields.keys()}
+            last_tangent_turn: int = -10
+            tangent_cooldown_turns: int = 3  # allow at most one tangent every 3–4 turns
             
             for turn_idx in range(max_turns):
                 logger.debug(f"Starting turn {turn_idx + 1}")
@@ -187,9 +191,25 @@ class SimulationEngine:
                 if sut_provided_summary:
                     logger.info(f"SUT provided summary at turn {turn_idx + 1}")
                 
-                # Proxy turn: Generate proxy response  
+                # Update fields captured based on SUT reply (simple heuristic on field labels)
+                fields_captured = self._update_fields_captured(fields_captured, sut_reply)
+
+                # Build per-turn controller
+                controller_text = self._build_turn_controller(
+                    turn_idx,
+                    sut_reply,
+                    fields_captured,
+                    last_tangent_turn,
+                    tangent_cooldown_turns,
+                    scenario.get("interaction_contract", "")
+                )
+                # Attach to scenario for this turn
+                scenario_turn = dict(scenario)
+                scenario_turn["turn_controller"] = controller_text
+
+                # Proxy turn: Generate proxy response
                 proxy_reply = self._handle_proxy_turn(turn_idx, messages, sut_reply,
-                                                    persona, scenario, persona_system_prompt)
+                                                    persona, scenario_turn, persona_system_prompt)
                 turns.append({"role": "user", "content": proxy_reply})
                 messages.append({"role": "user", "content": proxy_reply})
                 
@@ -197,6 +217,10 @@ class SimulationEngine:
                 if sut_provided_summary and self.analyzer.check_proxy_confirmation(proxy_reply):
                     logger.info(f"Conversation completed successfully at turn {turn_idx + 1}")
                     break
+
+                # If a tangent appears to have occurred, update last_tangent_turn
+                if self._detect_tangent(proxy_reply):
+                    last_tangent_turn = turn_idx
             
             # Save transcript
             md_path, jsonl_path = self._save_transcript(run_id, persona, scenario, turns, output_dir)
@@ -503,3 +527,86 @@ Do not add any second question in the same message.
             f"HESITATION PATTERNS: {patterns_str}"
         ]
         return "\n".join(parts)
+
+    # ------------------------------
+    # Turn controller helpers
+    # ------------------------------
+    def _update_fields_captured(self, fields_captured: Dict[str, bool], sut_reply: str) -> Dict[str, bool]:
+        """Heuristic: mark a field captured if SUT asked and received confirmation-like phrasing in prior messages.
+
+        Here we simply detect if SUT mentions a mandatory field label followed by a colon.
+        This is a minimal placeholder and can be upgraded to parse conversation state.
+        """
+        try:
+            text = (sut_reply or "").lower()
+            updated = dict(fields_captured)
+            for analysis_key, label in self.analyzer.mandatory_fields.items():
+                label_lower = label.lower().rstrip(":")
+                if f"{label_lower}:" in text:
+                    updated[analysis_key] = True
+            return updated
+        except Exception:
+            return fields_captured
+
+    def _detect_uncertainty(self, text: str) -> bool:
+        """Detect uncertainty phrases in proxy intent triggers."""
+        if not text:
+            return False
+        t = text.lower()
+        phrases = [
+            "i'm not sure", "i dont know", "i don't know", "not certain",
+            "unsure", "maybe", "i think", "market's crazy", "am i being too picky"
+        ]
+        return any(p in t for p in phrases)
+
+    def _detect_tangent(self, proxy_reply: str) -> bool:
+        """Minimal tangent heuristic: presence of 'anyway' or 'side note' often marks a micro-detour."""
+        if not proxy_reply:
+            return False
+        t = proxy_reply.lower()
+        return ("anyway" in t) or ("side note" in t) or ("btw" in t)
+
+    def _build_turn_controller(
+        self,
+        turn_idx: int,
+        sut_reply: str,
+        fields_captured: Dict[str, bool],
+        last_tangent_turn: int,
+        tangent_cooldown_turns: int,
+        contract: str,
+    ) -> str:
+        """Create a compact controller block for this turn using scenario dials embedded in contract text."""
+        # Extract dials from the contract text (simple regex fallback)
+        import re
+
+        def _extract_float(name: str, default: float) -> float:
+            try:
+                m = re.search(rf"{name}\s*:\s*([0-9]*\.?[0-9]+)", contract)
+                if m:
+                    return float(m.group(1))
+            except Exception:
+                pass
+            return default
+
+        clar_prob = _extract_float("clarifying_question_prob", 0.4)
+        tangent_prob = _extract_float("tangent_prob_after_field", 0.2)
+
+        # Determine if a field was just captured (based on SUT reply containing field labels)
+        field_just_captured = any(v for v in fields_captured.values())
+
+        # Clarifying allowed if uncertainty in prior content AND probabilistic roll below threshold
+        # We cannot roll here deterministically without RNG; instead, we inform the proxy with probability guidance.
+        clarifying_allowed = "maybe"
+
+        # Tangent allowed only if cooldown elapsed and a field was just captured
+        cooldown_remaining = max(0, (last_tangent_turn + tangent_cooldown_turns) - turn_idx)
+        tangent_allowed = "yes" if (cooldown_remaining <= 0 and field_just_captured) else "no"
+
+        lines = [
+            "TURN CONTROLLER:",
+            f"- clarifying_allowed: {clarifying_allowed} (rule: only if uncertainty phrase; use prob <= {clar_prob:.2f})",
+            f"- tangent_allowed: {tangent_allowed} (cooldown: {cooldown_remaining} turns)",
+            "- on_summary: confirm succinctly with approved closure phrasing",
+            "- resume_policy: after any tangent, answer the recruiter's last question directly",
+        ]
+        return "\n".join(lines)

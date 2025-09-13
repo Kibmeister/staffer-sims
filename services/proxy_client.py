@@ -126,6 +126,11 @@ class ProxyClient(BaseAPIClient):
         contract = scenario.get('interaction_contract')
         if contract:
             system_parts.append(contract)
+
+        # Turn controller: per-turn gates (clarifying/tangent/cooldown/closure)
+        turn_controller = scenario.get('turn_controller')
+        if turn_controller:
+            system_parts.append(turn_controller)
         
         return "\n".join(system_parts)
     
