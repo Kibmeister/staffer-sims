@@ -156,46 +156,26 @@ class SimulationEngine:
             for turn_idx in range(max_turns):
                 logger.debug(f"Starting turn {turn_idx + 1}")
                 
-                # For the first turn, start with SUT greeting and single question
-                if turn_idx == 0:
-                    # SUT greets first
-                    sut_reply = self._handle_sut_turn(turn_idx, messages, persona_system_prompt)
-                    turns.append({"role": "system", "content": sut_reply})
-                    messages.append({"role": "assistant", "content": sut_reply})
-
-                    # Proxy replies next
-                    proxy_reply = self._handle_proxy_turn(turn_idx, messages, sut_reply, 
-                                                        persona, scenario, persona_system_prompt)
-                    turns.append({"role": "user", "content": proxy_reply})
-                    messages.append({"role": "user", "content": proxy_reply})
-
-                    # Check if SUT provided summary (unlikely on first turn)
-                    sut_provided_summary = self.analyzer.check_sut_provided_summary(sut_reply)
-                else:
-                    # For subsequent turns, follow normal SUT -> Proxy pattern
-                    # Proxy reply
-                    proxy_reply = self._handle_proxy_turn(turn_idx, messages, sut_reply, 
-                                                        persona, scenario, persona_system_prompt)
-                    turns.append({"role": "user", "content": proxy_reply})
-                    
-                    # Update messages for next iteration
-                    messages.extend([
-                        {"role": "assistant", "content": sut_reply},
-                        {"role": "user", "content": proxy_reply}
-                    ])
-                    
-                    # Check for conversation completion
-                    if sut_provided_summary and self.analyzer.check_proxy_confirmation(proxy_reply):
-                        logger.info(f"Conversation completed successfully at turn {turn_idx + 1}")
-                        break
-                    
-                    # SUT reply (for next iteration)
-                    sut_reply = self._handle_sut_turn(turn_idx, messages, persona_system_prompt)
-                    turns.append({"role": "system", "content": sut_reply})
-                    messages.append({"role": "assistant", "content": sut_reply})
-                    
-                    # Check if SUT provided summary
-                    sut_provided_summary = self.analyzer.check_sut_provided_summary(sut_reply)
+                # SUT turn: Generate SUT response
+                sut_reply = self._handle_sut_turn(turn_idx, messages, persona_system_prompt)
+                turns.append({"role": "system", "content": sut_reply})
+                messages.append({"role": "assistant", "content": sut_reply})
+                
+                # Check if SUT provided summary
+                sut_provided_summary = self.analyzer.check_sut_provided_summary(sut_reply)
+                if sut_provided_summary:
+                    logger.info(f"SUT provided summary at turn {turn_idx + 1}")
+                
+                # Proxy turn: Generate proxy response  
+                proxy_reply = self._handle_proxy_turn(turn_idx, messages, sut_reply,
+                                                    persona, scenario, persona_system_prompt)
+                turns.append({"role": "user", "content": proxy_reply})
+                messages.append({"role": "user", "content": proxy_reply})
+                
+                # Check for conversation completion
+                if sut_provided_summary and self.analyzer.check_proxy_confirmation(proxy_reply):
+                    logger.info(f"Conversation completed successfully at turn {turn_idx + 1}")
+                    break
             
             # Save transcript
             md_path, jsonl_path = self._save_transcript(run_id, persona, scenario, turns, output_dir)
@@ -296,12 +276,16 @@ class SimulationEngine:
         # Use existing conversation history; last message should already be the SUT reply
         messages_for_proxy = self._sanitize_messages_for_proxy(messages)
         
-        # Build an override system prompt that centralizes behavioral rules
-        override_prompt = self._build_proxy_controller_prompt(persona, scenario, system_prompt)
+        # For the first turn, inject entry_context to ground the proxy properly
+        if turn_idx == 0:
+            entry_context = scenario.get('entry_context', '').strip()
+            if entry_context:
+                # Create a synthetic first message using entry_context
+                messages_for_proxy = [{"role": "user", "content": entry_context}]
         
         with self.langfuse_service.start_proxy_span(turn_idx, system_prompt, messages_for_proxy) as proxy_span:
             proxy_reply = self.proxy_client.send_persona_message(
-                persona, scenario, messages_for_proxy, system_prompt_override=override_prompt
+                persona, scenario, messages_for_proxy
             )
             proxy_span.update(output={"text": proxy_reply})
             return proxy_reply
@@ -310,16 +294,6 @@ class SimulationEngine:
         """Remove system-role messages; keep only assistant/user for the proxy."""
         return [m for m in messages if m.get("role") in {"assistant", "user"}]
 
-    def _build_proxy_controller_prompt(self, persona: Dict[str, Any], scenario: Dict[str, Any], base_prompt: str) -> str:
-        """Centralize proxy behavior controls in simulation layer rather than client code."""
-        controller = (
-            "PROXY CONTROLLER (hard constraints):\n"
-            "- Reply in one sentence when asked a question.\n"
-            "- Do not echo or repeat the assistant's question verbatim.\n"
-            "- Answer directly and concisely based on your persona and scenario context.\n"
-        )
-        # Reuse existing persona/scenario system prompt text
-        return controller + "\n" + base_prompt
     
     def _load_intro_prompt(self) -> str:
         """Load the introductory prompt for the first SUT message"""

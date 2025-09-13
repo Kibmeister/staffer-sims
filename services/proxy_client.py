@@ -121,7 +121,7 @@ class ProxyClient(BaseAPIClient):
         return "\n".join(system_parts)
     
     def send_persona_message(self, persona: Dict[str, Any], scenario: Dict[str, Any], 
-                           messages: List[Dict[str, str]], system_prompt_override: str | None = None) -> str:
+                           messages: List[Dict[str, str]]) -> str:
         """
         Send persona message through proxy API
         
@@ -133,8 +133,8 @@ class ProxyClient(BaseAPIClient):
         Returns:
             Persona response content
         """
-        # Build system prompt (allow override from simulation layer)
-        system_prompt = system_prompt_override or self._build_persona_system_prompt(persona, scenario)
+        # Build system prompt from persona and scenario only
+        system_prompt = self._build_persona_system_prompt(persona, scenario)
         
         # Defense-in-depth: ensure we only send ONE system message total
         cleaned_messages = [m for m in messages if m.get("role") != "system"]
