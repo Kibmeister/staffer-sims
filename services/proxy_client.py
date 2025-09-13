@@ -47,13 +47,15 @@ class ProxyClient(BaseAPIClient):
         forbidden = persona.get('forbidden_behaviors', [])
         if forbidden:
             system_parts.append("FORBIDDEN BEHAVIORS:")
-            system_parts.extend(forbidden)
+            for behavior in forbidden:
+                system_parts.append(f"- {behavior}")
         
         # Required behaviors
         required = persona.get('required_behaviors', [])
         if required:
             system_parts.append("REQUIRED BEHAVIORS:")
-            system_parts.extend(required)
+            for behavior in required:
+                system_parts.append(f"- {behavior}")
         
         # Response formula
         if persona.get('response_formula'):
@@ -78,13 +80,15 @@ class ProxyClient(BaseAPIClient):
         scenario_forbidden = scenario.get('forbidden_behaviors', [])
         if scenario_forbidden:
             system_parts.append("FORBIDDEN BEHAVIORS (scenario):")
-            system_parts.extend(scenario_forbidden)
+            for behavior in scenario_forbidden:
+                system_parts.append(f"- {behavior}")
         
         # Scenario required behaviors
         scenario_required = scenario.get('required_behaviors', [])
         if scenario_required:
             system_parts.append("REQUIRED BEHAVIORS (scenario):")
-            system_parts.extend(scenario_required)
+            for behavior in scenario_required:
+                system_parts.append(f"- {behavior}")
         
         # Scenario response formula (only if persona hasn't defined one to avoid conflicts)
         if scenario.get('response_formula') and not persona.get('response_formula'):
