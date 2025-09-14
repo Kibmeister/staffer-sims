@@ -366,7 +366,9 @@ CRITICAL FIRST MESSAGE RULES:
 - The single question should be: "How can I help you?" (or a close variant).
 - Do not assume any specific role, job title, or needs. Do not mention job titles.
 
-Example (acceptable): "Hi — I’m your recruiter assistant. How can I help you?"
+Example (acceptable): "Hi 👋 Welcome to Staffer. I'm your AI-powered recruiter, and I'm here to help you find your next great hire, faster.
+
+To get started and ensure I provide you with the best possible help, I'd love to learn a bit about your hiring needs."
 
 Do not add any second question in the same message.
 """
