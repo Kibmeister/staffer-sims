@@ -122,8 +122,32 @@ class SimulationEngine:
             ""
         ]
         
+        # Extract model and timestamp information for each role (SUT and Proxy)
+        sut_model = None
+        sut_timestamp = None
+        proxy_model = None
+        proxy_timestamp = None
+        
         for turn in turns:
-            lines.append(f"**{turn['role'].title()}**: {turn['content']}")
+            if turn['role'] == 'system' and sut_model is None:
+                sut_model = turn.get('model', 'unknown-model')
+                sut_timestamp = turn.get('timestamp', 'unknown-time')
+            elif turn['role'] == 'user' and proxy_model is None:
+                proxy_model = turn.get('model', 'unknown-model')
+                proxy_timestamp = turn.get('timestamp', 'unknown-time')
+        
+        # Add model and timestamp information under Scenario
+        if sut_model and sut_timestamp:
+            lines.append(f"**SUT Model:** {sut_model} - {sut_timestamp}")
+        if proxy_model and proxy_timestamp:
+            lines.append(f"**Proxy Model:** {proxy_model} - {proxy_timestamp}")
+        lines.append("")
+        
+        # Add conversation turns without model/timestamp info
+        for turn in turns:
+            role = turn['role'].title()
+            content = turn['content']
+            lines.append(f"**{role}**: {content}")
         
         return "\n\n".join(lines)
     
@@ -187,10 +211,15 @@ class SimulationEngine:
                 logger.debug(f"Starting turn {turn_idx + 1}")
                 
                 # SUT turn: Generate SUT response
-                sut_reply = self._handle_sut_turn(turn_idx, messages, persona_system_prompt,
+                sut_reply, sut_model, sut_timestamp = self._handle_sut_turn(turn_idx, messages, persona_system_prompt,
                                                 temperature=scenario.get('temperature_override'),
                                                 top_p=scenario.get('top_p_override'))
-                turns.append({"role": "system", "content": sut_reply})
+                turns.append({
+                    "role": "system", 
+                    "content": sut_reply,
+                    "model": sut_model,
+                    "timestamp": sut_timestamp
+                })
                 messages.append({"role": "assistant", "content": sut_reply})
                 
                 # Check if SUT provided summary
@@ -216,9 +245,14 @@ class SimulationEngine:
                 scenario_turn["turn_controller"] = controller_text
 
                 # Proxy turn: Generate proxy response
-                proxy_reply = self._handle_proxy_turn(turn_idx, messages, sut_reply,
+                proxy_reply, proxy_model, proxy_timestamp = self._handle_proxy_turn(turn_idx, messages, sut_reply,
                                                     persona, scenario_turn, persona_system_prompt)
-                turns.append({"role": "user", "content": proxy_reply})
+                turns.append({
+                    "role": "user", 
+                    "content": proxy_reply,
+                    "model": proxy_model,
+                    "timestamp": proxy_timestamp
+                })
                 messages.append({"role": "user", "content": proxy_reply})
                 
                 # Check for conversation completion
@@ -293,8 +327,12 @@ class SimulationEngine:
             return results
     
     def _handle_sut_turn(self, turn_idx: int, messages: List[Dict[str, str]], 
-                        system_prompt: str, temperature: float | None = None, top_p: float | None = None) -> str:
-        """Handle a single SUT turn"""
+                        system_prompt: str, temperature: float | None = None, top_p: float | None = None) -> tuple[str, str, str]:
+        """Handle a single SUT turn
+        
+        Returns:
+            Tuple of (response_content, model_name, timestamp)
+        """
         # For the first turn, use a special introductory prompt
         if turn_idx == 0:
             recruiter_prompt = self._load_intro_prompt()
@@ -311,7 +349,14 @@ class SimulationEngine:
         ] + messages
         
         with self.langfuse_service.start_sut_span(turn_idx, messages_for_sut) as sut_span:
+            # Capture timestamp before API call
+            timestamp = datetime.now().strftime("%H:%M:%S %d/%m/%Y")
+            
             sut_reply = self.sut_client.send_conversation(messages_for_sut, temperature=temperature, top_p=top_p)
+            
+            # Get model information from SUT client config
+            model_name = self.sut_client.config.model or "unknown-model"
+            
             # Enforce one-question-only where appropriate
             is_summary = self.analyzer.check_sut_provided_summary(sut_reply)
             if not is_summary:
@@ -320,12 +365,16 @@ class SimulationEngine:
                 else:
                     sut_reply = self._enforce_single_question_all_turns(sut_reply)
             sut_span.update(output={"text": sut_reply})
-            return sut_reply
+            return sut_reply, model_name, timestamp
     
     def _handle_proxy_turn(self, turn_idx: int, messages: List[Dict[str, str]], 
                           sut_reply: str, persona: Dict[str, Any], 
-                          scenario: Dict[str, Any], system_prompt: str) -> str:
-        """Handle a single proxy turn"""
+                          scenario: Dict[str, Any], system_prompt: str) -> tuple[str, str, str]:
+        """Handle a single proxy turn
+        
+        Returns:
+            Tuple of (response_content, model_name, timestamp)
+        """
         # Use existing conversation history; last message should already be the SUT reply
         messages_for_proxy = self._sanitize_messages_for_proxy(messages)
         
@@ -337,11 +386,18 @@ class SimulationEngine:
                 messages_for_proxy = [{"role": "user", "content": entry_context}]
         
         with self.langfuse_service.start_proxy_span(turn_idx, system_prompt, messages_for_proxy) as proxy_span:
+            # Capture timestamp before API call
+            timestamp = datetime.now().strftime("%H:%M:%S %d/%m/%Y")
+            
             proxy_reply = self.proxy_client.send_persona_message(
                 persona, scenario, messages_for_proxy
             )
+            
+            # Get model information from proxy client config
+            model_name = self.proxy_client.config.model or "unknown-model"
+            
             proxy_span.update(output={"text": proxy_reply})
-            return proxy_reply
+            return proxy_reply, model_name, timestamp
 
     def _sanitize_messages_for_proxy(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
         """Remove system-role messages; keep only assistant/user for the proxy."""
