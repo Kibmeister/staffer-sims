@@ -15,6 +15,7 @@ from services import SUTClient, ProxyClient, LangfuseService
 from services.base_api_client import APIClientConfig
 from services.langfuse_service import LangfuseConfig, ConversationMetadata
 from analysis import ConversationAnalyzer
+from analysis.models import ConversationStatus
 from config.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -123,10 +124,8 @@ class SimulationEngine:
         scenario_slug = _slugify(str(scenario.get("title", "scenario")))
         base_name = f"{run_id}__{persona_slug}__{scenario_slug}"
 
-        # Save markdown
+        # Save markdown (will be updated later with analysis)
         md_path = os.path.join(output_dir, f"{base_name}.md")
-        with open(md_path, "w") as f:
-            f.write(self._to_markdown(run_id, persona, scenario, turns, elapsed_time, timeout_reached, timeout_limit))
         
         # Save JSONL
         jsonl_path = os.path.join(output_dir, f"{base_name}.jsonl")
@@ -139,8 +138,9 @@ class SimulationEngine:
     
     def _to_markdown(self, run_id: str, persona: Dict[str, Any], 
                     scenario: Dict[str, Any], turns: List[Dict[str, Any]], 
-                    elapsed_time: float = 0, timeout_reached: bool = False, timeout_limit: int = 120) -> str:
-        """Convert conversation to markdown format"""
+                    elapsed_time: float = 0, timeout_reached: bool = False, timeout_limit: int = 120,
+                    final_outcome=None) -> str:
+        """Convert conversation to markdown format with enhanced failure reporting"""
         lines = [
             f"# Transcript {run_id}",
             f"**Persona:** {persona['name']}",
@@ -171,6 +171,23 @@ class SimulationEngine:
         # Add timeout information
         timeout_status = " (TIMEOUT REACHED)" if timeout_reached else ""
         lines.append(f"**Conversation Duration:** {elapsed_time:.1f}s / {timeout_limit}s{timeout_status}")
+        
+        # Add failure information if available
+        if final_outcome and final_outcome.total_failures > 0:
+            lines.append(f"**Failures Detected:** {final_outcome.total_failures}")
+            lines.append("")
+            lines.append("## 🚨 Failure Analysis")
+            lines.append("")
+            for failure in final_outcome.failures:
+                turn_info = f" (Turn {failure.turn_occurred})" if failure.turn_occurred else ""
+                lines.append(f"### {failure.category.value.replace('_', ' ').title()}{turn_info}")
+                lines.append(f"**Reason:** {failure.reason}")
+                if failure.error_message:
+                    lines.append(f"**Error:** `{failure.error_message}`")
+                if failure.context:
+                    lines.append(f"**Context:** {failure.context}")
+                lines.append("")
+        
         lines.append("")
         
         # Add conversation turns with controller block if present
@@ -222,6 +239,7 @@ class SimulationEngine:
         # Initialize conversation - start with empty messages; SUT will make first message
         messages = []
         turns = []
+        api_errors = []  # Track API errors during conversation
         persona_system_prompt = self._build_persona_system_prompt(persona)
         
         # Start Langfuse trace
@@ -257,9 +275,14 @@ class SimulationEngine:
                 logger.debug(f"Starting turn {turn_idx + 1} (elapsed: {elapsed_time:.1f}s)")
                 
                 # SUT turn: Generate SUT response
-                sut_reply, sut_model, sut_timestamp = self._handle_sut_turn(turn_idx, messages, persona_system_prompt,
-                                                temperature=scenario.get('temperature_override'),
-                                                top_p=scenario.get('top_p_override'))
+                try:
+                    sut_reply, sut_model, sut_timestamp = self._handle_sut_turn(turn_idx, messages, persona_system_prompt,
+                                                    temperature=scenario.get('temperature_override'),
+                                                    top_p=scenario.get('top_p_override'))
+                except Exception as e:
+                    api_errors.append(f"SUT API error at turn {turn_idx + 1}: {str(e)}")
+                    logger.error(f"SUT turn failed at turn {turn_idx + 1}: {e}")
+                    break  # End simulation on SUT failure
                 turns.append({
                     "role": "system",
                     "content": sut_reply,
@@ -294,9 +317,14 @@ class SimulationEngine:
                 scenario_turn["turn_controller"] = controller_text if use_controller else None
 
                 # Proxy turn: Generate proxy response
-                proxy_reply, proxy_model, proxy_timestamp = self._handle_proxy_turn(
-                    turn_idx, messages, sut_reply, persona, scenario_turn, persona_system_prompt, clarifying_allowed
-                )
+                try:
+                    proxy_reply, proxy_model, proxy_timestamp = self._handle_proxy_turn(
+                        turn_idx, messages, sut_reply, persona, scenario_turn, persona_system_prompt, clarifying_allowed
+                    )
+                except Exception as e:
+                    api_errors.append(f"Proxy API error at turn {turn_idx + 1}: {str(e)}")
+                    logger.error(f"Proxy turn failed at turn {turn_idx + 1}: {e}")
+                    break  # End simulation on proxy failure
                 turns.append({
                     "role": "user",
                     "content": proxy_reply,
@@ -341,7 +369,11 @@ class SimulationEngine:
                 )
             
             final_outcome = self.analyzer.determine_conversation_outcome(
-                turns, sut_provided_summary, proxy_confirmed
+                turns, sut_provided_summary, proxy_confirmed,
+                timeout_reached=timeout_reached,
+                api_errors=api_errors,
+                elapsed_time=final_elapsed_time,
+                timeout_limit=timeout_seconds
             )
             information_gathered = self.analyzer.extract_information_gathered(turns)
             
@@ -350,13 +382,17 @@ class SimulationEngine:
                 persona_name=persona["name"],
                 scenario_title=scenario["title"],
                 total_turns=len(turns),
-                completion_status=final_outcome.status,
+                completion_status=final_outcome.status.value,  # Convert enum to string
                 completion_level=final_outcome.completion_level,
                 transcript_path=md_path,
                 jsonl_path=jsonl_path
             )
             
-            transcript_md = self._to_markdown(run_id, persona, scenario, turns, final_elapsed_time, timeout_reached, timeout_seconds)
+            transcript_md = self._to_markdown(run_id, persona, scenario, turns, final_elapsed_time, timeout_reached, timeout_seconds, final_outcome)
+            
+            # Now write the markdown file with complete analysis
+            with open(md_path, "w") as f:
+                f.write(transcript_md)
             
             self.langfuse_service.update_trace_output(
                 conversation_summary.__dict__, final_outcome.__dict__, 
@@ -398,7 +434,22 @@ class SimulationEngine:
             }
             
             timeout_msg = " (TIMEOUT)" if timeout_reached else ""
-            logger.info(f"Simulation completed: {final_outcome.status} ({final_outcome.completion_level}%) in {final_elapsed_time:.1f}s{timeout_msg}")
+            failure_msg = f" with {final_outcome.total_failures} failures" if final_outcome.total_failures > 0 else ""
+            logger.info(f"Simulation completed: {final_outcome.status.value} ({final_outcome.completion_level}%) in {final_elapsed_time:.1f}s{timeout_msg}{failure_msg}")
+            
+            # Log detailed failure information
+            if final_outcome.failures:
+                logger.warning(f"Failures detected in simulation {run_id}:")
+                for failure in final_outcome.failures:
+                    turn_info = f" (turn {failure.turn_occurred})" if failure.turn_occurred else ""
+                    logger.warning(f"  - {failure.category.value}: {failure.reason}{turn_info}")
+                    if failure.error_message:
+                        logger.warning(f"    Error: {failure.error_message}")
+            
+            if api_errors:
+                logger.error(f"API errors occurred during simulation: {len(api_errors)} total")
+                for error in api_errors:
+                    logger.error(f"  - {error}")
             
             # Cleanup connections after simulation
             self._cleanup_connections()

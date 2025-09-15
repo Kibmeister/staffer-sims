@@ -82,6 +82,17 @@ def simulate(args):
     print(f"Conversation Outcome: {results['final_outcome']['status']} (Level: {results['final_outcome']['completion_level']}%)")
     print(f"Conversation Duration: {results.get('elapsed_time', 0):.1f}s / {results.get('timeout_limit', 120)}s{timeout_info}")
     
+    # Print failure information if any
+    failures = results['final_outcome'].get('failures', [])
+    total_failures = results['final_outcome'].get('total_failures', 0)
+    if total_failures > 0:
+        print(f"⚠️  Failures Detected: {total_failures} total")
+        for failure in failures[:3]:  # Show first 3 failures
+            turn_info = f" (turn {failure['turn_occurred']})" if failure.get('turn_occurred') else ""
+            print(f"   • {failure['category']}: {failure['reason']}{turn_info}")
+        if len(failures) > 3:
+            print(f"   • ... and {len(failures) - 3} more failures")
+    
     info = results['information_gathered']
     print(f"Information Gathered: {len(info['skills_mentioned'])} skills, Role: {info['role_type']}, Location: {info['location']}")
     

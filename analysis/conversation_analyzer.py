@@ -6,7 +6,10 @@ import re
 import logging
 from typing import List, Dict, Any, Set
 from pathlib import Path
-from .models import ConversationSummary, ConversationOutcome, InformationGathered, ConversationTurn
+from .models import (
+    ConversationSummary, ConversationOutcome, InformationGathered, ConversationTurn,
+    FailureCategory, FailureDetail, ConversationStatus
+)
 
 logger = logging.getLogger(__name__)
 
@@ -199,44 +202,110 @@ class ConversationAnalyzer:
     
     def determine_conversation_outcome(self, turns: List[Dict[str, Any]], 
                                     sut_provided_summary: bool, 
-                                    proxy_confirmed: bool) -> ConversationOutcome:
+                                    proxy_confirmed: bool,
+                                    timeout_reached: bool = False,
+                                    api_errors: List[str] = None,
+                                    elapsed_time: float = 0,
+                                    timeout_limit: int = 120) -> ConversationOutcome:
         """
-        Determine the final outcome of the conversation
+        Determine the final outcome of the conversation with enhanced failure categorization
         
         Args:
             turns: List of conversation turns
             sut_provided_summary: Whether SUT provided a summary
             proxy_confirmed: Whether proxy confirmed the summary
+            timeout_reached: Whether conversation timed out
+            api_errors: List of API error messages during conversation
+            elapsed_time: Total conversation time in seconds
+            timeout_limit: Maximum allowed conversation time
             
         Returns:
-            ConversationOutcome object
+            ConversationOutcome object with detailed failure analysis
         """
-        logger.debug(f"Determining outcome - Summary: {sut_provided_summary}, Confirmed: {proxy_confirmed}")
+        logger.debug(f"Determining outcome - Summary: {sut_provided_summary}, Confirmed: {proxy_confirmed}, Timeout: {timeout_reached}")
         
+        failures = []
+        api_errors = api_errors or []
+        
+        # Initialize outcome
         outcome = ConversationOutcome(
-            status="incomplete",
+            status=ConversationStatus.INCOMPLETE,
             completion_level=0,
             success_indicators=[],
-            issues=[]
+            issues=[],
+            failures=failures
         )
         
-        # Check for successful completion
-        if sut_provided_summary and proxy_confirmed:
-            outcome.status = "completed_successfully"
-            outcome.completion_level = 100
-            outcome.success_indicators.extend(["role_summary_provided", "user_confirmed_summary"])
-        elif sut_provided_summary:
-            outcome.status = "summary_provided_awaiting_confirmation"
-            outcome.completion_level = 80
-            outcome.success_indicators.append("role_summary_provided")
-            outcome.issues.append("user_did_not_confirm")
-        else:
-            outcome.status = "incomplete"
-            outcome.completion_level = 50
-            outcome.issues.append("no_role_summary_provided")
+        # Check for timeout failure
+        if timeout_reached:
+            failures.append(FailureDetail(
+                category=FailureCategory.TIMEOUT,
+                reason=f"Conversation exceeded {timeout_limit}s time limit",
+                context={
+                    "elapsed_time": elapsed_time,
+                    "timeout_limit": timeout_limit,
+                    "turns_completed": len(turns)
+                }
+            ))
+            outcome.status = ConversationStatus.TIMEOUT
+            outcome.completion_level = 25
+            outcome.issues.append("conversation_timeout")
+        
+        # Check for API errors
+        if api_errors:
+            for i, error in enumerate(api_errors):
+                failure_category = FailureCategory.API_ERROR
+                if "sut" in error.lower():
+                    failure_category = FailureCategory.SUT_ERROR
+                elif "proxy" in error.lower():
+                    failure_category = FailureCategory.PROXY_ERROR
+                
+                failures.append(FailureDetail(
+                    category=failure_category,
+                    reason="API request failed during conversation",
+                    error_message=error,
+                    context={"error_index": i}
+                ))
+            
+            if not timeout_reached:  # Only override status if not already timeout
+                outcome.status = ConversationStatus.ERROR
+                outcome.completion_level = 10
+                outcome.issues.append("api_errors_occurred")
+        
+        # Check for persona drift and protocol violations
+        persona_issues = self._analyze_persona_adherence(turns)
+        failures.extend(persona_issues)
+        
+        # Check for incomplete information gathering
+        info_issues = self._analyze_information_completeness(turns)
+        failures.extend(info_issues)
+        
+        # Determine success status (only if no major failures)
+        if not timeout_reached and not api_errors:
+            if sut_provided_summary and proxy_confirmed:
+                outcome.status = ConversationStatus.COMPLETED_SUCCESSFULLY
+                outcome.completion_level = 100
+                outcome.success_indicators.extend(["role_summary_provided", "user_confirmed_summary"])
+            elif sut_provided_summary:
+                outcome.status = ConversationStatus.SUMMARY_PROVIDED_AWAITING_CONFIRMATION
+                outcome.completion_level = 80
+                outcome.success_indicators.append("role_summary_provided")
+                outcome.issues.append("user_did_not_confirm")
+                failures.append(FailureDetail(
+                    category=FailureCategory.USER_ABANDONMENT,
+                    reason="User did not confirm the provided summary"
+                ))
+            else:
+                outcome.status = ConversationStatus.INCOMPLETE
+                outcome.completion_level = 50
+                outcome.issues.append("no_role_summary_provided")
+                failures.append(FailureDetail(
+                    category=FailureCategory.INCOMPLETE_INFORMATION,
+                    reason="SUT did not provide a role summary"
+                ))
         
         # Check for role-playing quality
-        for turn in turns:
+        for turn_idx, turn in enumerate(turns):
             if turn.get("role") == "user":  # Proxy responses
                 content = turn.get("content", "").lower()
                 
@@ -246,7 +315,11 @@ class ConversationAnalyzer:
                 if any(phrase in content for phrase in self.persona_characteristics):
                     outcome.success_indicators.append("persona_characteristics_expressed")
         
-        logger.debug(f"Outcome determined: {outcome.status} ({outcome.completion_level}%)")
+        # Update failures and total count
+        outcome.failures = failures
+        outcome.total_failures = len(failures)
+        
+        logger.debug(f"Outcome determined: {outcome.status.value} ({outcome.completion_level}%) with {outcome.total_failures} failures")
         return outcome
     
     def extract_information_gathered(self, turns: List[Dict[str, Any]]) -> InformationGathered:
@@ -544,3 +617,111 @@ class ConversationAnalyzer:
             True if a tangent was included
         """
         return "by the way" in proxy_reply.lower() or "anyway" in proxy_reply.lower()
+    
+    def _analyze_persona_adherence(self, turns: List[Dict[str, Any]]) -> List[FailureDetail]:
+        """
+        Analyze conversation for persona drift and protocol violations
+        
+        Args:
+            turns: List of conversation turns
+            
+        Returns:
+            List of FailureDetail objects for persona-related issues
+        """
+        failures = []
+        
+        for turn_idx, turn in enumerate(turns):
+            if turn.get("role") == "user":  # Proxy responses
+                content = turn.get("content", "").lower()
+                
+                # Check for role reversal (proxy acting like recruiter)
+                recruiter_phrases = [
+                    "i can help you with", "let me ask you about", "what's your budget",
+                    "i'll need to know", "let me gather", "i'm here to help you find"
+                ]
+                if any(phrase in content for phrase in recruiter_phrases):
+                    failures.append(FailureDetail(
+                        category=FailureCategory.PERSONA_DRIFT,
+                        reason="Proxy user acting like recruiter instead of hiring manager",
+                        turn_occurred=turn_idx + 1,
+                        context={"violating_phrases": [p for p in recruiter_phrases if p in content]}
+                    ))
+                
+                # Check for breaking character
+                breaking_character_phrases = [
+                    "i'm an ai", "as an ai", "i'm a language model", "i'm not real",
+                    "this is a simulation", "i'm programmed"
+                ]
+                if any(phrase in content for phrase in breaking_character_phrases):
+                    failures.append(FailureDetail(
+                        category=FailureCategory.PERSONA_DRIFT,
+                        reason="Proxy broke character and revealed AI nature",
+                        turn_occurred=turn_idx + 1,
+                        context={"breaking_phrases": [p for p in breaking_character_phrases if p in content]}
+                    ))
+            
+            elif turn.get("role") == "system":  # SUT responses
+                content = turn.get("content", "").lower()
+                
+                # Check for SUT breaking protocol (asking multiple questions)
+                question_count = content.count("?")
+                if question_count > 1:
+                    failures.append(FailureDetail(
+                        category=FailureCategory.PROTOCOL_VIOLATION,
+                        reason=f"SUT asked {question_count} questions in one turn (should be 1)",
+                        turn_occurred=turn_idx + 1,
+                        context={"question_count": question_count}
+                    ))
+                
+                # Check for SUT not following role guidelines
+                if "i don't know" in content or "i can't help" in content:
+                    failures.append(FailureDetail(
+                        category=FailureCategory.SUT_ERROR,
+                        reason="SUT expressed inability to help (should maintain recruiter role)",
+                        turn_occurred=turn_idx + 1
+                    ))
+        
+        return failures
+    
+    def _analyze_information_completeness(self, turns: List[Dict[str, Any]]) -> List[FailureDetail]:
+        """
+        Analyze conversation for incomplete information gathering
+        
+        Args:
+            turns: List of conversation turns
+            
+        Returns:
+            List of FailureDetail objects for information completeness issues
+        """
+        failures = []
+        
+        # Check which mandatory fields were gathered
+        full_conversation = " ".join([turn.get("content", "") for turn in turns])
+        extracted_fields = self._extract_all_fields(full_conversation)
+        
+        # Count missing mandatory fields
+        missing_fields = []
+        for field_key, field_name in self.mandatory_fields.items():
+            if not extracted_fields.get(field_key):
+                missing_fields.append(field_name)
+        
+        if len(missing_fields) > len(self.mandatory_fields) * 0.5:  # More than 50% missing
+            failures.append(FailureDetail(
+                category=FailureCategory.INCOMPLETE_INFORMATION,
+                reason=f"Missing {len(missing_fields)} out of {len(self.mandatory_fields)} mandatory fields",
+                context={
+                    "missing_fields": missing_fields,
+                    "gathered_fields": [field for field, value in extracted_fields.items() if value],
+                    "completion_percentage": ((len(self.mandatory_fields) - len(missing_fields)) / len(self.mandatory_fields)) * 100
+                }
+            ))
+        
+        # Check for very short conversation (potential abandonment)
+        if len(turns) < 4:  # Less than 2 exchanges
+            failures.append(FailureDetail(
+                category=FailureCategory.USER_ABANDONMENT,
+                reason=f"Conversation ended prematurely with only {len(turns)} turns",
+                context={"total_turns": len(turns)}
+            ))
+        
+        return failures

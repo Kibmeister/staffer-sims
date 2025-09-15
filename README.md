@@ -228,11 +228,20 @@ Pre-configured hiring manager personas with:
   - `elaboration_distribution`: `{ one_sentence: float, two_sentences: float, three_sentences: float }`
   - Optional: `topic_preferences`: `string[]`
 
-### 📈 Comprehensive Analytics
+### 📈 Comprehensive Analytics & Failure Categorization
 
 - **Conversation Flow Analysis**: Track turn-by-turn interactions
 - **Information Extraction**: Automatically extract job details, requirements, and preferences
 - **Outcome Assessment**: Evaluate conversation completion and success metrics
+- **Enhanced Failure Categorization**: Comprehensive failure detection and classification:
+  - **10 Distinct Failure Categories**: Timeout, API errors, persona drift, protocol violations, etc.
+  - **Turn-specific Tracking**: Pinpoint exactly where failures occurred
+  - **Contextual Information**: Rich failure context for debugging
+  - **Automated Detection**: Real-time failure identification during conversations
+- **Advanced Reporting**: Multi-format failure analysis:
+  - **Console Output**: Immediate failure summaries with emoji indicators
+  - **Markdown Transcripts**: Dedicated failure analysis sections
+  - **Detailed Logging**: Comprehensive failure information in logs
 - **Langfuse Integration**: Full observability with traces, spans, and evaluations
   - Trace tags now include:
     - `persona`, `scenario`
@@ -258,6 +267,113 @@ Connection pooling and performance optimizations:
 - **Automatic Cleanup**: Proper connection cleanup after simulations
 - **Timeout Handling**: 30-second request timeouts to prevent hanging
 
+## 🚨 Failure Categorization & Quality Monitoring
+
+Staffer Sims features advanced failure detection and categorization to ensure simulation quality and reliability:
+
+### Failure Categories
+
+| Category                   | Description                              | Detection Method                         |
+| -------------------------- | ---------------------------------------- | ---------------------------------------- |
+| **Timeout**                | Conversation exceeded time limits        | Automatic timeout monitoring             |
+| **API Error**              | General API communication failures       | Exception handling                       |
+| **SUT Error**              | System Under Test specific failures      | API response analysis                    |
+| **Proxy Error**            | Proxy client specific failures           | API response analysis                    |
+| **Persona Drift**          | User breaking character or role          | Pattern matching & phrase detection      |
+| **Protocol Violation**     | Breaking conversation rules              | Turn analysis (e.g., multiple questions) |
+| **Incomplete Information** | Missing mandatory fields                 | Field extraction analysis                |
+| **User Abandonment**       | Premature conversation termination       | Turn count & duration analysis           |
+| **System Error**           | Internal system errors                   | Exception handling                       |
+| **Validation Error**       | Configuration or input validation issues | Pre-flight validation                    |
+
+### Failure Detection Features
+
+#### **Real-time Monitoring**
+
+- Continuous conversation quality assessment
+- Turn-by-turn failure detection
+- Immediate error categorization
+
+#### **Persona Adherence Tracking**
+
+- Role reversal detection (proxy acting like recruiter)
+- Character breaking identification (revealing AI nature)
+- Inappropriate phrase recognition
+
+#### **Protocol Compliance**
+
+- Single question per turn enforcement
+- Conversation flow validation
+- Response format verification
+
+#### **Information Completeness**
+
+- Mandatory field extraction tracking
+- Completion percentage calculation
+- Missing information identification
+
+### Reporting Formats
+
+#### **Console Output**
+
+```bash
+⚠️  Failures Detected: 3 total
+   • timeout: Conversation exceeded 120s time limit (turn 8)
+   • persona_drift: Proxy user acting like recruiter instead of hiring manager (turn 5)
+   • incomplete_information: Missing 4 out of 8 mandatory fields
+```
+
+#### **Markdown Transcripts**
+
+Enhanced transcript files include dedicated failure analysis sections:
+
+```markdown
+**Failures Detected:** 3
+
+## 🚨 Failure Analysis
+
+### Timeout (Turn 8)
+
+**Reason:** Conversation exceeded 120s time limit
+**Context:** {'elapsed_time': 125.3, 'timeout_limit': 120, 'turns_completed': 8}
+
+### Persona Drift (Turn 5)
+
+**Reason:** Proxy user acting like recruiter instead of hiring manager
+**Context:** {'violating_phrases': ['let me ask you about', 'i can help you with']}
+
+### Incomplete Information
+
+**Reason:** Missing 4 out of 8 mandatory fields
+**Context:** {'missing_fields': ['salary_range', 'experience_level'], 'completion_percentage': 50.0}
+```
+
+#### **Detailed Logging**
+
+Comprehensive failure information in application logs:
+
+```
+WARNING:simulation_engine:Failures detected in simulation 20240315_143022:
+WARNING:simulation_engine:  - timeout: Conversation exceeded 120s time limit (turn 8)
+WARNING:simulation_engine:    Context: {'elapsed_time': 125.3, 'timeout_limit': 120}
+```
+
+### Quality Metrics
+
+#### **Failure Statistics**
+
+- Total failure count per simulation
+- Failure category distribution
+- Turn-specific failure tracking
+- Failure rate trends
+
+#### **Quality Indicators**
+
+- Conversation completion rates
+- Information extraction success
+- Persona adherence scores
+- Protocol compliance metrics
+
 ## 📁 File Structure Details
 
 ### Core Components
@@ -275,9 +391,17 @@ Connection pooling and performance optimizations:
 
 ### Output Files
 
-- **`*.md`**: Human-readable conversation transcripts
+- **`*.md`**: Human-readable conversation transcripts with enhanced failure analysis:
+  - Complete conversation flow
+  - Turn-by-turn controller decisions
+  - Comprehensive failure categorization section
+  - Contextual failure information
+  - Quality metrics and completion status
 - **`*.jsonl`**: Machine-readable conversation data for analysis
 - **Langfuse traces**: Detailed observability data with spans and evaluations
+  - Enhanced with failure metadata
+  - Cost tracking and usage statistics
+  - Conversation outcome analysis
 
 ## 🔍 Use Cases
 
@@ -301,7 +425,77 @@ Generate realistic conversation data for training or fine-tuning recruitment AI 
 
 Validate that AI recruiters follow proper workflows and extract all necessary information.
 
+### 6. Failure Analysis & Debugging
+
+Comprehensive failure detection and categorization for:
+
+- Identifying conversation quality issues
+- Debugging persona adherence problems
+- Monitoring protocol compliance
+- Tracking information extraction completeness
+- Analyzing timeout and performance issues
+
+### 7. System Reliability Monitoring
+
+Continuous monitoring of simulation quality:
+
+- Real-time failure detection during conversations
+- Automated quality metrics collection
+- Performance trend analysis
+- System health monitoring
+
 ## 🛠️ Development
+
+### Enhanced Data Models for Failure Analysis
+
+The system includes comprehensive data models for failure categorization and quality monitoring:
+
+#### **FailureDetail Model**
+
+```python
+@dataclass
+class FailureDetail:
+    category: FailureCategory          # Failure type (enum)
+    reason: str                        # Human-readable reason
+    error_message: Optional[str]       # API error message (if applicable)
+    turn_occurred: Optional[int]       # Turn number where failure occurred
+    context: Optional[Dict[str, Any]]  # Additional context data
+```
+
+#### **ConversationOutcome Model**
+
+```python
+@dataclass
+class ConversationOutcome:
+    status: ConversationStatus         # Success/failure status (enum)
+    completion_level: int              # 0-100 completion percentage
+    success_indicators: List[str]      # Success indicators
+    issues: List[str]                  # Issues identified
+    failures: List[FailureDetail]     # Detailed failure list
+    total_failures: int               # Total failure count
+```
+
+#### **Failure Categories (Enum)**
+
+```python
+class FailureCategory(Enum):
+    TIMEOUT = "timeout"
+    API_ERROR = "api_error"
+    PERSONA_DRIFT = "persona_drift"
+    SUT_ERROR = "sut_error"
+    PROXY_ERROR = "proxy_error"
+    PROTOCOL_VIOLATION = "protocol_violation"
+    INCOMPLETE_INFORMATION = "incomplete_information"
+    USER_ABANDONMENT = "user_abandonment"
+    SYSTEM_ERROR = "system_error"
+    VALIDATION_ERROR = "validation_error"
+```
+
+#### **Enhanced Analysis Methods**
+
+- `determine_conversation_outcome()` - Comprehensive outcome analysis with failure detection
+- `_analyze_persona_adherence()` - Role-playing quality assessment
+- `_analyze_information_completeness()` - Information extraction validation
 
 ### Adding New Personas
 

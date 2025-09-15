@@ -173,6 +173,132 @@ config/
 - Optimized timeouts
 - Production service URLs
 
+## 🚨 Failure Categorization & Quality Monitoring
+
+Staffer Sims includes comprehensive failure detection and quality monitoring capabilities that can be configured through environment variables and CLI arguments.
+
+### Failure Categories
+
+The system automatically detects and categorizes 10 distinct types of failures:
+
+| Category | Description | Configuration |
+|----------|-------------|---------------|
+| **Timeout** | Conversation exceeds time limits | `REQUEST_TIMEOUT`, `--timeout` |
+| **API Error** | General API communication failures | `RETRY_ATTEMPTS`, `RETRY_DELAY` |
+| **SUT Error** | System Under Test specific failures | `SUT_URL`, request timeout settings |
+| **Proxy Error** | Proxy client specific failures | `PROXY_URL`, request timeout settings |
+| **Persona Drift** | User breaking character or role | Built-in pattern detection |
+| **Protocol Violation** | Breaking conversation rules | Built-in rule enforcement |
+| **Incomplete Information** | Missing mandatory fields | Dynamic field extraction |
+| **User Abandonment** | Premature conversation termination | `MAX_TURNS` configuration |
+| **System Error** | Internal system errors | Error handling and logging |
+| **Validation Error** | Configuration validation issues | Pre-flight validation |
+
+### Quality Monitoring Configuration
+
+#### **Timeout Settings**
+```bash
+# Environment variables
+REQUEST_TIMEOUT=30        # Individual API request timeout (seconds)
+MAX_TURNS=18             # Maximum conversation turns
+
+# CLI arguments
+--timeout 120            # Maximum conversation duration (seconds)
+```
+
+#### **Connection Pooling**
+```bash
+# Optimize performance and reduce API failures
+POOL_CONNECTIONS=10      # Number of connection pools to cache
+POOL_MAXSIZE=20         # Maximum connections per pool
+```
+
+#### **Retry Configuration**
+```bash
+# Handle transient API failures
+RETRY_ATTEMPTS=3         # Number of retry attempts
+RETRY_DELAY=1.0         # Delay between retries (seconds)
+```
+
+#### **Logging Configuration**
+```bash
+# Control failure reporting verbosity
+LOG_LEVEL=INFO          # DEBUG for detailed failure analysis
+DEBUG=true              # Enable debug mode for development
+```
+
+### Quality Metrics Collection
+
+#### **Automatic Metrics**
+- Failure count per simulation
+- Failure category distribution
+- Turn-specific failure tracking
+- Conversation completion rates
+- Information extraction success rates
+
+#### **Langfuse Integration**
+Enhanced observability with failure metadata:
+```bash
+LANGFUSE_PUBLIC_KEY=pk-...
+LANGFUSE_SECRET_KEY=sk-...
+LANGFUSE_HOST=https://cloud.langfuse.com
+```
+
+### Failure Analysis Output
+
+#### **Console Reporting**
+Immediate failure summaries during simulation runs:
+```bash
+⚠️  Failures Detected: 3 total
+   • timeout: Conversation exceeded 120s time limit (turn 8)
+   • persona_drift: Proxy user acting like recruiter (turn 5)
+   • incomplete_information: Missing 4 out of 8 mandatory fields
+```
+
+#### **Enhanced Markdown Transcripts**
+Detailed failure analysis sections in transcript files:
+- Categorized failure information
+- Turn-specific failure tracking
+- Contextual error details
+- Quality metrics summary
+
+#### **Structured Logging**
+Comprehensive failure information in application logs:
+```
+WARNING:simulation_engine:Failures detected in simulation 20240315_143022:
+WARNING:simulation_engine:  - timeout: Conversation exceeded 120s time limit (turn 8)
+WARNING:simulation_engine:    Context: {'elapsed_time': 125.3, 'timeout_limit': 120}
+```
+
+### Configuration for Different Use Cases
+
+#### **Quality Assurance Testing**
+```bash
+# Strict timeouts and comprehensive logging
+REQUEST_TIMEOUT=15
+MAX_TURNS=12
+LOG_LEVEL=DEBUG
+--timeout 90
+```
+
+#### **Performance Testing**
+```bash
+# Optimized for throughput
+POOL_CONNECTIONS=20
+POOL_MAXSIZE=50
+REQUEST_TIMEOUT=30
+RETRY_ATTEMPTS=1
+```
+
+#### **Development & Debugging**
+```bash
+# Enhanced logging and flexible timeouts
+DEBUG=true
+LOG_LEVEL=DEBUG
+REQUEST_TIMEOUT=60
+--timeout 300
+```
+
 ## 🔍 Configuration Validation
 
 The `validate_config.py` script checks:
