@@ -98,6 +98,70 @@ python simulate.py --persona personas/alex_smith.yml --scenario scenarios/referr
 python simulate.py --persona personas/alex_smith.yml --scenario scenarios/referralCrisis_seniorBackendEngineer.yml --output my_results
 ```
 
+## 🖥️ CLI Arguments
+
+The `simulate.py` script supports the following command-line arguments:
+
+### Required Arguments
+
+| Argument     | Type   | Description                | Example                                              |
+| ------------ | ------ | -------------------------- | ---------------------------------------------------- |
+| `--persona`  | string | Path to persona YAML file  | `personas/alex_smith.yml`                            |
+| `--scenario` | string | Path to scenario YAML file | `scenarios/referralCrisis_seniorBackendEngineer.yml` |
+
+### Optional Arguments
+
+| Argument           | Type    | Default                    | Description                                   | Example                                   |
+| ------------------ | ------- | -------------------------- | --------------------------------------------- | ----------------------------------------- |
+| `--output`         | string  | `output`                   | Output directory for transcripts              | `--output my_results`                     |
+| `--seed`           | integer | auto-generated             | Deterministic RNG seed for per-turn decisions | `--seed 12345678`                         |
+| `--temperature`    | float   | `0.7`                      | Sampling temperature (0.0-1.2)                | `--temperature 0.0`                       |
+| `--top_p`          | float   | `1.0`                      | Nucleus sampling top_p (0.0-1.0)              | `--top_p 0.9`                             |
+| `--sut-prompt`     | string  | `prompts/recruiter_v1.txt` | Path to SUT system prompt file                | `--sut-prompt prompts/recruiter_v1.2.txt` |
+| `--use-controller` | boolean | `True`                     | Enable or disable the controller logic        | `--use-controller False`                  |
+| `--timeout`        | integer | `120`                      | Maximum conversation duration in seconds      | `--timeout 180`                           |
+
+### Usage Examples
+
+**Basic run:**
+
+```bash
+python simulate.py --persona personas/alex_smith.yml --scenario scenarios/referralCrisis_seniorBackendEngineer.yml
+```
+
+**Deterministic run with custom settings:**
+
+```bash
+python simulate.py \
+  --persona personas/alex_smith.yml \
+  --scenario scenarios/referralCrisis_seniorBackendEngineer.yml \
+  --seed 12345678 \
+  --temperature 0.0 \
+  --top_p 1.0 \
+  --timeout 180
+```
+
+**Custom prompt and output:**
+
+```bash
+python simulate.py \
+  --persona personas/sara_mitchell.yml \
+  --scenario scenarios/ai_scepticism_in_recruitment.yml \
+  --sut-prompt prompts/recruiter_v1.2.txt \
+  --output custom_results \
+  --use-controller True
+```
+
+**Testing without controller:**
+
+```bash
+python simulate.py \
+  --persona personas/alex_smith.yml \
+  --scenario scenarios/referralCrisis_seniorBackendEngineer.yml \
+  --use-controller False \
+  --timeout 300
+```
+
 ## ⚙️ Configuration
 
 ### Environment Variables
@@ -369,7 +433,7 @@ Control sampling for reproducibility vs creativity:
   ```bash
   python simulate.py --persona personas/alex_smith.yml \
     --scenario scenarios/referralCrisis_seniorBackendEngineer.yml \
-    --sut-prompt prompts/recruiter_v1.txt
+    --sut-prompt prompts/recruiter_v1.txt \
     --seed 12345678 --temperature 0.0 --top_p 1.0
   ```
 - Environment:

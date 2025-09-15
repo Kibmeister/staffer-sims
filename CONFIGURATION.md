@@ -31,6 +31,59 @@ This guide explains how to set up and manage environment configuration for the S
    python simulate.py --persona personas/alex_smith.yml --scenario scenarios/senior_backend_engineer.yml
    ```
 
+## 🖥️ Command Line Interface
+
+### Available CLI Arguments
+
+| Argument           | Type    | Required | Default                    | Description                                  |
+| ------------------ | ------- | -------- | -------------------------- | -------------------------------------------- |
+| `--persona`        | string  | ✅       | -                          | Path to persona YAML file                    |
+| `--scenario`       | string  | ✅       | -                          | Path to scenario YAML file                   |
+| `--output`         | string  | ❌       | `output`                   | Output directory for transcripts             |
+| `--seed`           | integer | ❌       | auto-generated             | Deterministic RNG seed for reproducible runs |
+| `--temperature`    | float   | ❌       | `0.7`                      | Sampling temperature (0.0-1.2)               |
+| `--top_p`          | float   | ❌       | `1.0`                      | Nucleus sampling top_p (0.0-1.0)             |
+| `--sut-prompt`     | string  | ❌       | `prompts/recruiter_v1.txt` | Path to SUT system prompt file               |
+| `--use-controller` | boolean | ❌       | `True`                     | Enable/disable controller logic              |
+| `--timeout`        | integer | ❌       | `120`                      | Maximum conversation duration (seconds)      |
+
+### CLI Usage Examples
+
+**Standard simulation:**
+
+```bash
+python simulate.py --persona personas/alex_smith.yml --scenario scenarios/referralCrisis_seniorBackendEngineer.yml
+```
+
+**Deterministic simulation:**
+
+```bash
+python simulate.py \
+  --persona personas/alex_smith.yml \
+  --scenario scenarios/referralCrisis_seniorBackendEngineer.yml \
+  --seed 12345678 \
+  --temperature 0.0
+```
+
+**Custom timeout and prompt:**
+
+```bash
+python simulate.py \
+  --persona personas/sara_mitchell.yml \
+  --scenario scenarios/ai_scepticism_in_recruitment.yml \
+  --sut-prompt prompts/recruiter_v1.2.txt \
+  --timeout 300
+```
+
+**Disable controller for baseline testing:**
+
+```bash
+python simulate.py \
+  --persona personas/alex_smith.yml \
+  --scenario scenarios/referralCrisis_seniorBackendEngineer.yml \
+  --use-controller False
+```
+
 ## 📁 Configuration Structure
 
 ```
@@ -77,10 +130,13 @@ config/
 | `PROXY_URL`       | `https://openrouter.ai/api/v1/chat/completions` | Proxy service URL                                 |
 | `LANGFUSE_HOST`   | `https://cloud.langfuse.com`                    | Langfuse host URL                                 |
 | `MAX_TURNS`       | `18`                                            | Maximum conversation turns                        |
-| `REQUEST_TIMEOUT` | `120`                                           | Request timeout in seconds                        |
+| `REQUEST_TIMEOUT` | `30`                                            | Individual API request timeout in seconds         |
 | `RETRY_ATTEMPTS`  | `3`                                             | Number of retry attempts                          |
 | `RETRY_DELAY`     | `1.0`                                           | Delay between retries in seconds                  |
 | `OUTPUT_DIR`      | `output`                                        | Output directory for simulation results           |
+| `RNG_SEED`        | None                                            | Default RNG seed for deterministic runs           |
+| `TEMPERATURE`     | `0.7`                                           | Default sampling temperature                      |
+| `TOP_P`           | `1.0`                                           | Default nucleus sampling top_p                    |
 
 ## 🌍 Environment-Specific Configuration
 
@@ -140,26 +196,38 @@ sut_api_config = settings.get_sut_api_config()
 
 ```bash
 # Development with OpenRouter only
-ENVIRONMENT=development API_PROVIDER=openrouter python simulate.py --persona personas/alex_smith.yml --scenario scenarios/senior_backend_engineer.yml
+ENVIRONMENT=development API_PROVIDER=openrouter python simulate.py \
+  --persona personas/alex_smith.yml \
+  --scenario scenarios/referralCrisis_seniorBackendEngineer.yml
 
 # Staging with both providers
-ENVIRONMENT=staging API_PROVIDER=both python simulate.py --persona personas/alex_smith.yml --scenario scenarios/senior_backend_engineer.yml
+ENVIRONMENT=staging API_PROVIDER=both python simulate.py \
+  --persona personas/alex_smith.yml \
+  --scenario scenarios/referralCrisis_seniorBackendEngineer.yml
 
 # Production with OpenAI only
-ENVIRONMENT=production API_PROVIDER=openai python simulate.py --persona personas/alex_smith.yml --scenario scenarios/senior_backend_engineer.yml
+ENVIRONMENT=production API_PROVIDER=openai python simulate.py \
+  --persona personas/alex_smith.yml \
+  --scenario scenarios/referralCrisis_seniorBackendEngineer.yml
 ```
 
 ### API Provider Examples
 
 ```bash
 # Use only OpenRouter (recommended for cost savings)
-API_PROVIDER=openrouter python simulate.py --persona personas/alex_smith.yml --scenario scenarios/senior_backend_engineer.yml
+API_PROVIDER=openrouter python simulate.py \
+  --persona personas/alex_smith.yml \
+  --scenario scenarios/referralCrisis_seniorBackendEngineer.yml
 
 # Use only OpenAI (if you prefer OpenAI's models)
-API_PROVIDER=openai python simulate.py --persona personas/alex_smith.yml --scenario scenarios/senior_backend_engineer.yml
+API_PROVIDER=openai python simulate.py \
+  --persona personas/alex_smith.yml \
+  --scenario scenarios/referralCrisis_seniorBackendEngineer.yml
 
 # Use both (OpenAI for SUT, OpenRouter for Proxy)
-API_PROVIDER=both python simulate.py --persona personas/alex_smith.yml --scenario scenarios/senior_backend_engineer.yml
+API_PROVIDER=both python simulate.py \
+  --persona personas/alex_smith.yml \
+  --scenario scenarios/referralCrisis_seniorBackendEngineer.yml
 ```
 
 ## 🔒 Security Best Practices

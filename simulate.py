@@ -63,20 +63,25 @@ def simulate(args):
         scenario = dict(scenario)
         scenario['rng_seed_override'] = int(settings.rng_seed)
 
-    # Allow temperature/top_p overrides
+    # Allow temperature/top_p/timeout overrides
     if getattr(args, 'temperature', None) is not None:
         scenario = dict(scenario)
         scenario['temperature_override'] = float(args.temperature)
     if getattr(args, 'top_p', None) is not None:
         scenario = dict(scenario)
         scenario['top_p_override'] = float(args.top_p)
+    if getattr(args, 'timeout', None) is not None:
+        scenario = dict(scenario)
+        scenario['conversation_timeout'] = int(args.timeout)
 
     results = engine.run_simulation(persona, scenario, output_dir)
     
     # Print results summary
     print(f"Saved: {results['transcript_path']}")
     print(f"Saved: {results['jsonl_path']}")
+    timeout_info = f" - TIMEOUT REACHED" if results.get('timeout_reached', False) else ""
     print(f"Conversation Outcome: {results['final_outcome']['status']} (Level: {results['final_outcome']['completion_level']}%)")
+    print(f"Conversation Duration: {results.get('elapsed_time', 0):.1f}s / {results.get('timeout_limit', 120)}s{timeout_info}")
     
     info = results['information_gathered']
     print(f"Information Gathered: {len(info['skills_mentioned'])} skills, Role: {info['role_type']}, Location: {info['location']}")
@@ -93,5 +98,6 @@ if __name__ == "__main__":
     parser.add_argument("--top_p", type=float, help="Nucleus sampling top_p (0..1)")
     parser.add_argument("--sut-prompt", default="prompts/recruiter_v1.txt", help="Path to SUT system prompt file (default: prompts/recruiter_v1.txt)")
     parser.add_argument("--use-controller", type=lambda x: (str(x).lower() == 'true'), default=True, help="Enable or disable the controller logic (default: True)")
+    parser.add_argument("--timeout", type=int, default=120, help="Maximum conversation duration in seconds (default: 120)")
     args = parser.parse_args()
     simulate(args)

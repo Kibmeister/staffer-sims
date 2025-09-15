@@ -17,7 +17,8 @@ class APIClientConfig:
     """Configuration for API clients"""
     url: str
     headers: Dict[str, str]
-    timeout: int = 60
+    timeout: int = 30  # Total timeout for API requests
+    connection_timeout: int = 10  # Timeout for initial connection
     max_retries: int = 3
     backoff_factor: float = 1.0
     model: Optional[str] = None
@@ -65,11 +66,13 @@ class BaseAPIClient:
         logger.debug(f"Request payload keys: {list(payload.keys())}")
         
         try:
+            # Use tuple for (connection_timeout, read_timeout)
+            timeout_tuple = (self.config.connection_timeout, self.config.timeout)
             response = self.session.post(
                 self.config.url,
                 headers=self.config.headers,
                 json=payload,
-                timeout=self.config.timeout
+                timeout=timeout_tuple
             )
             
             logger.debug(f"Response status: {response.status_code}")
@@ -85,8 +88,8 @@ class BaseAPIClient:
             return response.json()
             
         except requests.exceptions.Timeout:
-            logger.error(f"Request timeout after {self.config.timeout} seconds")
-            raise APITimeoutError(f"Request timeout after {self.config.timeout} seconds")
+            logger.error(f"Request timeout (connection: {self.config.connection_timeout}s, read: {self.config.timeout}s)")
+            raise APITimeoutError(f"Request timeout (connection: {self.config.connection_timeout}s, read: {self.config.timeout}s)")
         except requests.exceptions.RequestException as e:
             logger.error(f"Request failed: {e}")
             raise APIError(f"Request failed: {e}")

@@ -40,6 +40,7 @@ class SimulationEngine:
             url=sut_config["url"],
             headers=sut_config["headers"],
             timeout=self.settings.request_timeout,
+            connection_timeout=10,  # 10 seconds for connection establishment
             max_retries=self.settings.retry_attempts,
             model=sut_config.get("model")
         )
@@ -52,6 +53,7 @@ class SimulationEngine:
             url=proxy_config["url"],
             headers=proxy_config["headers"],
             timeout=self.settings.request_timeout,
+            connection_timeout=10,  # 10 seconds for connection establishment
             max_retries=self.settings.retry_attempts,
             model=proxy_config.get("model")
         )
@@ -79,7 +81,8 @@ class SimulationEngine:
     
     def _save_transcript(self, run_id: str, persona: Dict[str, Any], 
                         scenario: Dict[str, Any], turns: List[Dict[str, Any]], 
-                        output_dir: str) -> tuple[str, str]:
+                        output_dir: str, elapsed_time: float = 0, 
+                        timeout_reached: bool = False, timeout_limit: int = 120) -> tuple[str, str]:
         """
         Save conversation transcript in both markdown and JSONL formats
         
@@ -102,7 +105,7 @@ class SimulationEngine:
         # Save markdown
         md_path = os.path.join(output_dir, f"{base_name}.md")
         with open(md_path, "w") as f:
-            f.write(self._to_markdown(run_id, persona, scenario, turns))
+            f.write(self._to_markdown(run_id, persona, scenario, turns, elapsed_time, timeout_reached, timeout_limit))
         
         # Save JSONL
         jsonl_path = os.path.join(output_dir, f"{base_name}.jsonl")
@@ -114,7 +117,8 @@ class SimulationEngine:
         return md_path, jsonl_path
     
     def _to_markdown(self, run_id: str, persona: Dict[str, Any], 
-                    scenario: Dict[str, Any], turns: List[Dict[str, Any]]) -> str:
+                    scenario: Dict[str, Any], turns: List[Dict[str, Any]], 
+                    elapsed_time: float = 0, timeout_reached: bool = False, timeout_limit: int = 120) -> str:
         """Convert conversation to markdown format"""
         lines = [
             f"# Transcript {run_id}",
@@ -142,6 +146,10 @@ class SimulationEngine:
             lines.append(f"**SUT Model:** {sut_model} - {sut_timestamp}")
         if proxy_model and proxy_timestamp:
             lines.append(f"**Proxy Model:** {proxy_model} - {proxy_timestamp}")
+        
+        # Add timeout information
+        timeout_status = " (TIMEOUT REACHED)" if timeout_reached else ""
+        lines.append(f"**Conversation Duration:** {elapsed_time:.1f}s / {timeout_limit}s{timeout_status}")
         lines.append("")
         
         # Add conversation turns with controller block if present
@@ -168,11 +176,17 @@ class SimulationEngine:
         Returns:
             Simulation results dictionary
         """
+        import time
+        
         run_id = self._generate_run_id()
         max_turns = scenario.get("max_turns", self.settings.max_turns)
         output_dir = output_dir or self.settings.output_dir
         
-        logger.info(f"Starting simulation {run_id} with {max_turns} max turns")
+        # Set timeout limit (120 seconds by default, configurable via scenario)
+        timeout_seconds = scenario.get("conversation_timeout", 120)
+        simulation_start_time = time.time()
+        
+        logger.info(f"Starting simulation {run_id} with {max_turns} max turns and {timeout_seconds}s timeout")
         
         # Compute and attach run-time behavior dials and interaction contract
         # Allow seed override from scenario (CLI/env)
@@ -213,7 +227,13 @@ class SimulationEngine:
             use_controller = scenario.get('use_controller', True)
             controller_text = None  # Ensure controller_text is always defined
             for turn_idx in range(max_turns):
-                logger.debug(f"Starting turn {turn_idx + 1}")
+                # Check timeout before each turn
+                elapsed_time = time.time() - simulation_start_time
+                if elapsed_time >= timeout_seconds:
+                    logger.warning(f"Simulation timeout reached ({elapsed_time:.1f}s >= {timeout_seconds}s) at turn {turn_idx + 1}")
+                    break
+                
+                logger.debug(f"Starting turn {turn_idx + 1} (elapsed: {elapsed_time:.1f}s)")
                 
                 # SUT turn: Generate SUT response
                 sut_reply, sut_model, sut_timestamp = self._handle_sut_turn(turn_idx, messages, persona_system_prompt,
@@ -224,7 +244,7 @@ class SimulationEngine:
                     "content": sut_reply,
                     "model": sut_model,
                     "timestamp": sut_timestamp,
-                    "turn_controller": controller_text if use_controller else None
+                    "turn_controller": None  # Never show controller for SUT turns
                 })
                 messages.append({"role": "assistant", "content": sut_reply})
                 
@@ -281,8 +301,13 @@ class SimulationEngine:
                 if tangent_decision or self._detect_tangent(proxy_reply):
                     last_tangent_turn = turn_idx
             
+            # Calculate final elapsed time
+            final_elapsed_time = time.time() - simulation_start_time
+            timeout_reached = final_elapsed_time >= timeout_seconds
+            
             # Save transcript
-            md_path, jsonl_path = self._save_transcript(run_id, persona, scenario, turns, output_dir)
+            md_path, jsonl_path = self._save_transcript(run_id, persona, scenario, turns, output_dir, 
+                                                      final_elapsed_time, timeout_reached, timeout_seconds)
             
             # Analyze conversation
             conversation_summary = self.analyzer.extract_conversation_summary(turns)
@@ -310,7 +335,7 @@ class SimulationEngine:
                 jsonl_path=jsonl_path
             )
             
-            transcript_md = self._to_markdown(run_id, persona, scenario, turns)
+            transcript_md = self._to_markdown(run_id, persona, scenario, turns, final_elapsed_time, timeout_reached, timeout_seconds)
             
             self.langfuse_service.update_trace_output(
                 conversation_summary.__dict__, final_outcome.__dict__, 
@@ -337,10 +362,14 @@ class SimulationEngine:
                 "final_outcome": final_outcome.__dict__,
                 "information_gathered": information_gathered.__dict__,
                 "transcript_path": md_path,
-                "jsonl_path": jsonl_path
+                "jsonl_path": jsonl_path,
+                "elapsed_time": final_elapsed_time,
+                "timeout_reached": timeout_reached,
+                "timeout_limit": timeout_seconds
             }
             
-            logger.info(f"Simulation completed: {final_outcome.status} ({final_outcome.completion_level}%)")
+            timeout_msg = " (TIMEOUT)" if timeout_reached else ""
+            logger.info(f"Simulation completed: {final_outcome.status} ({final_outcome.completion_level}%) in {final_elapsed_time:.1f}s{timeout_msg}")
             return results
     
     def _handle_sut_turn(self, turn_idx: int, messages: List[Dict[str, str]], 
@@ -415,6 +444,102 @@ class SimulationEngine:
             
             # Enforce clarifying/tangent only if controller is enabled
             if scenario.get('use_controller', True):
+                # Prevent clarifying questions when not allowed
+                if clarifying_allowed == "no":
+                    # Remove common clarifying question patterns
+                    import re
+                    
+                    # Remove multiple questions in sequence
+                    proxy_reply = re.sub(r'\?[^.!]*\?', '?', proxy_reply)
+                    
+                    # Remove specific clarifying question patterns
+                    clarifying_patterns = [
+                        r'What would you do if you were in my shoes\?',
+                        r'Can you clarify that\?',
+                        r'What do you think\?',
+                        r'What do you think would help[^?]*\?',
+                        r'What would you suggest\?',
+                        r'What\'s the best way to[^?]*\?',
+                        r'What if we[^?]*\?',
+                        r'How would you[^?]*\?',
+                        r'What should I[^?]*\?',
+                        r'Do you think[^?]*\?',
+                        r'Would you recommend[^?]*\?',
+                        r'What\'s your opinion on[^?]*\?',
+                        r'How do you feel about[^?]*\?',
+                        r'What\'s your take on[^?]*\?',
+                        r'Any suggestions[^?]*\?',
+                        r'Any advice[^?]*\?',
+                        r'What would you recommend[^?]*\?',
+                        r'How should I[^?]*\?',
+                        r'What\'s the right approach[^?]*\?',
+                        r'What do you suggest[^?]*\?',
+                        r'Any thoughts on[^?]*\?',
+                        r'What\'s your view on[^?]*\?',
+                        r'How would you approach[^?]*\?',
+                        r'What\'s your recommendation[^?]*\?',
+                        r'Any ideas on[^?]*\?',
+                        r'What\'s your advice[^?]*\?',
+                        r'How do you see[^?]*\?',
+                        r'What\'s your perspective on[^?]*\?',
+                        r'Any recommendations[^?]*\?',
+                        r'What would you advise[^?]*\?',
+                        r'How would you handle[^?]*\?',
+                        r'What\'s the best approach[^?]*\?',
+                        r'Any guidance[^?]*\?',
+                        r'What\'s your suggestion[^?]*\?',
+                        r'How should we[^?]*\?',
+                        r'What do you recommend[^?]*\?',
+                        r'Any tips on[^?]*\?',
+                        r'What\'s your input on[^?]*\?',
+                        r'How would you suggest[^?]*\?',
+                        r'What\'s your guidance[^?]*\?',
+                        r'Any suggestions for[^?]*\?',
+                        r'What would you propose[^?]*\?',
+                        r'How do you recommend[^?]*\?',
+                        r'What\'s your recommendation for[^?]*\?',
+                        r'Any advice on[^?]*\?',
+                        r'What\'s your take on[^?]*\?',
+                        r'How would you recommend[^?]*\?',
+                        r'What do you think about[^?]*\?',
+                        r'Any thoughts about[^?]*\?',
+                        r'What\'s your opinion about[^?]*\?',
+                        r'How do you feel about[^?]*\?',
+                        r'What\'s your view about[^?]*\?',
+                        r'How would you approach[^?]*\?',
+                        r'What\'s your perspective about[^?]*\?',
+                        r'Any ideas about[^?]*\?',
+                        r'What\'s your advice about[^?]*\?',
+                        r'How do you see[^?]*\?',
+                        r'What\'s your suggestion about[^?]*\?',
+                        r'How should we approach[^?]*\?',
+                        r'What do you recommend about[^?]*\?',
+                        r'Any tips about[^?]*\?',
+                        r'What\'s your input about[^?]*\?',
+                        r'How would you suggest about[^?]*\?',
+                        r'What\'s your guidance about[^?]*\?',
+                        r'Any suggestions about[^?]*\?',
+                        r'What would you propose about[^?]*\?',
+                        r'How do you recommend about[^?]*\?',
+                        r'What\'s your recommendation about[^?]*\?',
+                        r'Any advice about[^?]*\?',
+                        r'What\'s your take about[^?]*\?',
+                        r'How would you recommend about[^?]*\?'
+                    ]
+                    
+                    # Apply all clarifying question patterns
+                    for pattern in clarifying_patterns:
+                        proxy_reply = re.sub(pattern, '', proxy_reply, flags=re.IGNORECASE)
+                    
+                    # Clean up any remaining question marks at the end
+                    proxy_reply = re.sub(r'\s*\?\s*$', '', proxy_reply)
+                    
+                    # Clean up extra whitespace and punctuation
+                    proxy_reply = re.sub(r'\s+', ' ', proxy_reply)
+                    proxy_reply = re.sub(r'\s*,\s*$', '', proxy_reply)
+                    proxy_reply = re.sub(r'\s*\.\s*$', '', proxy_reply)
+                    proxy_reply = proxy_reply.strip()
+                
                 # Enforce clarifying question if allowed and uncertainty is detected
                 if clarifying_allowed == "yes" and self._detect_uncertainty(sut_reply):
                     proxy_reply += " Can you clarify that?"

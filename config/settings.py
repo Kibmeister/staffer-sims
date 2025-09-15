@@ -30,7 +30,7 @@ class Settings:
     
     # Performance Settings
     max_turns: int = 18
-    request_timeout: int = 120
+    request_timeout: int = 30  # 30-second timeout for individual API requests
     retry_attempts: int = 3
     retry_delay: float = 1.0
 
@@ -111,7 +111,7 @@ class Settings:
             
             # Performance Settings
             max_turns=int(os.getenv("MAX_TURNS", "18")),
-            request_timeout=int(os.getenv("REQUEST_TIMEOUT", "120")),
+            request_timeout=int(os.getenv("REQUEST_TIMEOUT", "30")),
             retry_attempts=int(os.getenv("RETRY_ATTEMPTS", "3")),
             retry_delay=float(os.getenv("RETRY_DELAY", "1.0")),
             
