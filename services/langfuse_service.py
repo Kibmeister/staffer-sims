@@ -26,6 +26,9 @@ class ConversationMetadata:
     completion_level: int
     transcript_path: str
     jsonl_path: str
+    random_seed: Optional[str] = None
+    temperature: Optional[str] = None
+    top_p: Optional[str] = None
 
 class LangfuseService:
     """Service for managing Langfuse integrations"""

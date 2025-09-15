@@ -93,6 +93,10 @@ def simulate(args):
         if len(failures) > 3:
             print(f"   • ... and {len(failures) - 3} more failures")
     
+    # Print sampling parameters
+    sampling = results.get('sampling_parameters', {})
+    print(f"Sampling Parameters: Seed={sampling.get('random_seed', 'auto')}, Temp={sampling.get('temperature', 'default')}, Top-P={sampling.get('top_p', 'default')}")
+    
     info = results['information_gathered']
     print(f"Information Gathered: {len(info['skills_mentioned'])} skills, Role: {info['role_type']}, Location: {info['location']}")
     

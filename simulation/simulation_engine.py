@@ -122,14 +122,32 @@ class SimulationEngine:
 
         persona_slug = _slugify(str(persona.get("name", "persona")))
         scenario_slug = _slugify(str(scenario.get("title", "scenario")))
-        base_name = f"{run_id}__{persona_slug}__{scenario_slug}"
+        seed = scenario.get("rng_seed", "auto")
+        base_name = f"{run_id}__{persona_slug}__{scenario_slug}__seed_{seed}"
 
         # Save markdown (will be updated later with analysis)
         md_path = os.path.join(output_dir, f"{base_name}.md")
         
-        # Save JSONL
+        # Save JSONL with metadata
         jsonl_path = os.path.join(output_dir, f"{base_name}.jsonl")
         with open(jsonl_path, "w") as f:
+            # Write metadata header
+            metadata = {
+                "run_id": run_id,
+                "persona": persona["name"],
+                "scenario": scenario["title"],
+                "sut_prompt_path": self.sut_prompt_path,
+                "random_seed": scenario.get("rng_seed", "auto-generated"),
+                "temperature": scenario.get("temperature_override", "default"),
+                "top_p": scenario.get("top_p_override", "default"),
+                "elapsed_time": elapsed_time,
+                "timeout_reached": timeout_reached,
+                "timeout_limit": timeout_limit,
+                "total_turns": len(turns)
+            }
+            f.write(json.dumps({"type": "metadata", **metadata}, ensure_ascii=False) + "\n")
+            
+            # Write conversation turns
             for turn in turns:
                 f.write(json.dumps(turn, ensure_ascii=False) + "\n")
         
@@ -147,6 +165,15 @@ class SimulationEngine:
             f"**Scenario:** {scenario['title']}",
             f"**SUT System Prompt:** {self.sut_prompt_path}"
         ]
+        
+        # Add sampling parameters
+        seed = scenario.get("rng_seed", "auto-generated")
+        temperature = scenario.get("temperature_override", "default")
+        top_p = scenario.get("top_p_override", "default")
+        
+        lines.append(f"**Random Seed:** {seed}")
+        lines.append(f"**Temperature:** {temperature}")
+        lines.append(f"**Top-P:** {top_p}")
         
         # Extract model and timestamp information for each role (SUT and Proxy)
         sut_model = None
@@ -247,11 +274,16 @@ class SimulationEngine:
             persona["name"], scenario["title"], scenario.get("entry_context", "")
         ) as trace:
             
-            # Set trace tags
+            # Set trace tags including sampling parameters
+            temperature = scenario.get("temperature_override", "default")
+            top_p = scenario.get("top_p_override", "default")
+            
             self.langfuse_service.update_trace_tags([
                 persona["name"], 
                 scenario["title"],
                 f"seed:{seed}",
+                f"temp:{temperature}",
+                f"top_p:{top_p}",
                 f"clarify:{dials['clarifying_question_prob']:.2f}",
                 f"tangent:{dials['tangent_prob_after_field']:.2f}",
                 f"hesitation:{dials['hesitation_insert_prob']:.2f}"
@@ -385,7 +417,10 @@ class SimulationEngine:
                 completion_status=final_outcome.status.value,  # Convert enum to string
                 completion_level=final_outcome.completion_level,
                 transcript_path=md_path,
-                jsonl_path=jsonl_path
+                jsonl_path=jsonl_path,
+                random_seed=str(scenario.get("rng_seed", "auto-generated")),
+                temperature=str(scenario.get("temperature_override", "default")),
+                top_p=str(scenario.get("top_p_override", "default"))
             )
             
             transcript_md = self._to_markdown(run_id, persona, scenario, turns, final_elapsed_time, timeout_reached, timeout_seconds, final_outcome)
@@ -423,6 +458,11 @@ class SimulationEngine:
                 "elapsed_time": final_elapsed_time,
                 "timeout_reached": timeout_reached,
                 "timeout_limit": timeout_seconds,
+                "sampling_parameters": {
+                    "random_seed": scenario.get("rng_seed", "auto-generated"),
+                    "temperature": scenario.get("temperature_override", "default"),
+                    "top_p": scenario.get("top_p_override", "default")
+                },
                 "usage_stats": {
                     "total_tokens": self.usage_stats.total_tokens,
                     "input_tokens": self.usage_stats.total_input_tokens,

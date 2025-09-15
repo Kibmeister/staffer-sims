@@ -84,6 +84,145 @@ python simulate.py \
   --use-controller False
 ```
 
+## 🔬 Enhanced Sampling Parameter Logging
+
+Staffer Sims provides comprehensive logging and observability of all sampling parameters to ensure full reproducibility and auditability across all output formats.
+
+### Sampling Parameters Configuration
+
+#### **CLI Arguments**
+
+```bash
+# Set specific seed for reproducible runs
+--seed 12345
+
+# Configure temperature for response creativity
+--temperature 0.7
+
+# Set top_p for nucleus sampling
+--top_p 1.0
+```
+
+#### **Environment Variables**
+
+```bash
+# Default values (can be overridden by CLI)
+RNG_SEED=12345
+TEMPERATURE=0.7
+TOP_P=1.0
+```
+
+### Output Format Integration
+
+#### **Enhanced Markdown Transcripts**
+
+All markdown transcripts now include sampling parameters in the header:
+
+```markdown
+# Transcript 20240315_143022
+
+**Persona:** Alex Smith
+**Scenario:** Senior Backend Engineer
+**SUT System Prompt:** prompts/recruiter_v1.txt
+**Random Seed:** 12345
+**Temperature:** 0.7
+**Top-P:** 1.0
+**SUT Model:** gpt-4 - 14:30:22 15/03/2024
+**Proxy Model:** gpt-3.5-turbo - 14:30:22 15/03/2024
+**Conversation Duration:** 45.2s / 120s
+```
+
+#### **Enhanced JSONL Metadata**
+
+JSONL files include structured metadata as the first line:
+
+```json
+{
+  "type": "metadata",
+  "run_id": "20240315_143022",
+  "persona": "Alex Smith",
+  "scenario": "Senior Backend Engineer",
+  "sut_prompt_path": "prompts/recruiter_v1.txt",
+  "random_seed": 12345,
+  "temperature": 0.7,
+  "top_p": 1.0,
+  "elapsed_time": 45.2,
+  "timeout_reached": false,
+  "timeout_limit": 120,
+  "total_turns": 8
+}
+```
+
+#### **Enhanced Console Output**
+
+Console output shows sampling parameters in the simulation summary:
+
+```bash
+Saved: output/20240315_143022__alex-smith__senior-backend-engineer__seed_12345.md
+Saved: output/20240315_143022__alex-smith__senior-backend-engineer__seed_12345.jsonl
+Conversation Outcome: completed_successfully (Level: 100%)
+Conversation Duration: 45.2s / 120s
+Sampling Parameters: Seed=12345, Temp=0.7, Top-P=1.0
+Information Gathered: 5 skills, Role: Senior Backend Engineer, Location: Remote
+API Usage: 1250 tokens (4 SUT + 4 Proxy calls)
+Estimated Cost: $0.003750
+```
+
+#### **Enhanced Langfuse Trace Tags**
+
+Langfuse traces include sampling parameters as tags for filtering and analysis:
+
+```
+Alex Smith
+Senior Backend Engineer
+seed:12345
+temp:0.7
+top_p:1.0
+clarify:0.40
+tangent:0.20
+hesitation:0.10
+```
+
+### Filename Integration
+
+Output files include seed values for easy identification and reproducibility:
+
+```
+output/
+├── 20240315_143022__alex-smith__senior-backend-engineer__seed_12345.md
+├── 20240315_143022__alex-smith__senior-backend-engineer__seed_12345.jsonl
+├── 20240315_143023__sara-mitchell__ai-scepticism__seed_67890.md
+└── 20240315_143023__sara-mitchell__ai-scepticism__seed_67890.jsonl
+```
+
+### Configuration Examples
+
+#### **Reproducible Research Runs**
+
+```bash
+# Fixed seed for reproducible results
+python simulate.py --persona personas/alex_smith.yml --scenario scenarios/referralCrisis_seniorBackendEngineer.yml --seed 12345 --temperature 0.7 --top_p 1.0
+```
+
+#### **Parameter Sweep Testing**
+
+```bash
+# Test different temperature values
+python simulate.py --persona personas/alex_smith.yml --scenario scenarios/referralCrisis_seniorBackendEngineer.yml --seed 12345 --temperature 0.3
+python simulate.py --persona personas/alex_smith.yml --scenario scenarios/referralCrisis_seniorBackendEngineer.yml --seed 12345 --temperature 0.7
+python simulate.py --persona personas/alex_smith.yml --scenario scenarios/referralCrisis_seniorBackendEngineer.yml --seed 12345 --temperature 1.0
+```
+
+#### **Creative vs Conservative Responses**
+
+```bash
+# Conservative responses (lower temperature)
+python simulate.py --persona personas/alex_smith.yml --scenario scenarios/referralCrisis_seniorBackendEngineer.yml --temperature 0.3 --top_p 0.9
+
+# Creative responses (higher temperature)
+python simulate.py --persona personas/alex_smith.yml --scenario scenarios/referralCrisis_seniorBackendEngineer.yml --temperature 1.0 --top_p 1.0
+```
+
 ### Performance Optimization
 
 The system includes several performance optimizations:
@@ -181,22 +320,23 @@ Staffer Sims includes comprehensive failure detection and quality monitoring cap
 
 The system automatically detects and categorizes 10 distinct types of failures:
 
-| Category | Description | Configuration |
-|----------|-------------|---------------|
-| **Timeout** | Conversation exceeds time limits | `REQUEST_TIMEOUT`, `--timeout` |
-| **API Error** | General API communication failures | `RETRY_ATTEMPTS`, `RETRY_DELAY` |
-| **SUT Error** | System Under Test specific failures | `SUT_URL`, request timeout settings |
-| **Proxy Error** | Proxy client specific failures | `PROXY_URL`, request timeout settings |
-| **Persona Drift** | User breaking character or role | Built-in pattern detection |
-| **Protocol Violation** | Breaking conversation rules | Built-in rule enforcement |
-| **Incomplete Information** | Missing mandatory fields | Dynamic field extraction |
-| **User Abandonment** | Premature conversation termination | `MAX_TURNS` configuration |
-| **System Error** | Internal system errors | Error handling and logging |
-| **Validation Error** | Configuration validation issues | Pre-flight validation |
+| Category                   | Description                         | Configuration                         |
+| -------------------------- | ----------------------------------- | ------------------------------------- |
+| **Timeout**                | Conversation exceeds time limits    | `REQUEST_TIMEOUT`, `--timeout`        |
+| **API Error**              | General API communication failures  | `RETRY_ATTEMPTS`, `RETRY_DELAY`       |
+| **SUT Error**              | System Under Test specific failures | `SUT_URL`, request timeout settings   |
+| **Proxy Error**            | Proxy client specific failures      | `PROXY_URL`, request timeout settings |
+| **Persona Drift**          | User breaking character or role     | Built-in pattern detection            |
+| **Protocol Violation**     | Breaking conversation rules         | Built-in rule enforcement             |
+| **Incomplete Information** | Missing mandatory fields            | Dynamic field extraction              |
+| **User Abandonment**       | Premature conversation termination  | `MAX_TURNS` configuration             |
+| **System Error**           | Internal system errors              | Error handling and logging            |
+| **Validation Error**       | Configuration validation issues     | Pre-flight validation                 |
 
 ### Quality Monitoring Configuration
 
 #### **Timeout Settings**
+
 ```bash
 # Environment variables
 REQUEST_TIMEOUT=30        # Individual API request timeout (seconds)
@@ -207,6 +347,7 @@ MAX_TURNS=18             # Maximum conversation turns
 ```
 
 #### **Connection Pooling**
+
 ```bash
 # Optimize performance and reduce API failures
 POOL_CONNECTIONS=10      # Number of connection pools to cache
@@ -214,6 +355,7 @@ POOL_MAXSIZE=20         # Maximum connections per pool
 ```
 
 #### **Retry Configuration**
+
 ```bash
 # Handle transient API failures
 RETRY_ATTEMPTS=3         # Number of retry attempts
@@ -221,6 +363,7 @@ RETRY_DELAY=1.0         # Delay between retries (seconds)
 ```
 
 #### **Logging Configuration**
+
 ```bash
 # Control failure reporting verbosity
 LOG_LEVEL=INFO          # DEBUG for detailed failure analysis
@@ -230,6 +373,7 @@ DEBUG=true              # Enable debug mode for development
 ### Quality Metrics Collection
 
 #### **Automatic Metrics**
+
 - Failure count per simulation
 - Failure category distribution
 - Turn-specific failure tracking
@@ -237,7 +381,9 @@ DEBUG=true              # Enable debug mode for development
 - Information extraction success rates
 
 #### **Langfuse Integration**
+
 Enhanced observability with failure metadata:
+
 ```bash
 LANGFUSE_PUBLIC_KEY=pk-...
 LANGFUSE_SECRET_KEY=sk-...
@@ -247,7 +393,9 @@ LANGFUSE_HOST=https://cloud.langfuse.com
 ### Failure Analysis Output
 
 #### **Console Reporting**
+
 Immediate failure summaries during simulation runs:
+
 ```bash
 ⚠️  Failures Detected: 3 total
    • timeout: Conversation exceeded 120s time limit (turn 8)
@@ -256,14 +404,18 @@ Immediate failure summaries during simulation runs:
 ```
 
 #### **Enhanced Markdown Transcripts**
+
 Detailed failure analysis sections in transcript files:
+
 - Categorized failure information
 - Turn-specific failure tracking
 - Contextual error details
 - Quality metrics summary
 
 #### **Structured Logging**
+
 Comprehensive failure information in application logs:
+
 ```
 WARNING:simulation_engine:Failures detected in simulation 20240315_143022:
 WARNING:simulation_engine:  - timeout: Conversation exceeded 120s time limit (turn 8)
@@ -273,6 +425,7 @@ WARNING:simulation_engine:    Context: {'elapsed_time': 125.3, 'timeout_limit': 
 ### Configuration for Different Use Cases
 
 #### **Quality Assurance Testing**
+
 ```bash
 # Strict timeouts and comprehensive logging
 REQUEST_TIMEOUT=15
@@ -282,6 +435,7 @@ LOG_LEVEL=DEBUG
 ```
 
 #### **Performance Testing**
+
 ```bash
 # Optimized for throughput
 POOL_CONNECTIONS=20
@@ -291,6 +445,7 @@ RETRY_ATTEMPTS=1
 ```
 
 #### **Development & Debugging**
+
 ```bash
 # Enhanced logging and flexible timeouts
 DEBUG=true

@@ -243,10 +243,15 @@ Pre-configured hiring manager personas with:
   - **Markdown Transcripts**: Dedicated failure analysis sections
   - **Detailed Logging**: Comprehensive failure information in logs
 - **Langfuse Integration**: Full observability with traces, spans, and evaluations
-  - Trace tags now include:
+  - Enhanced trace tags include:
     - `persona`, `scenario`
-    - `seed:<int>`
+    - `seed:<int>`, `temp:<float>`, `top_p:<float>`
     - `clarify:<0-1>`, `tangent:<0-1>`, `hesitation:<0-1>`
+- **Enhanced Sampling Parameter Logging**: Complete observability of seed, temperature, and top_p:
+  - **Transcript Headers**: Sampling parameters in markdown output
+  - **JSONL Metadata**: Structured parameter data for analysis
+  - **Filename Integration**: Seed values in output filenames for easy identification
+  - **Console Reporting**: Immediate parameter visibility in simulation results
 
 ### 🔧 Flexible API Integration
 
@@ -374,6 +379,107 @@ WARNING:simulation_engine:    Context: {'elapsed_time': 125.3, 'timeout_limit': 
 - Persona adherence scores
 - Protocol compliance metrics
 
+## 🔬 Enhanced Sampling Parameter Logging
+
+Staffer Sims provides comprehensive logging and observability of all sampling parameters to ensure full reproducibility and auditability:
+
+### Sampling Parameters Tracked
+
+| Parameter       | Description                                  | Default        | CLI Override    |
+| --------------- | -------------------------------------------- | -------------- | --------------- |
+| **Random Seed** | Deterministic RNG seed for reproducible runs | Auto-generated | `--seed`        |
+| **Temperature** | Sampling temperature (0.0-1.2)               | 0.7            | `--temperature` |
+| **Top-P**       | Nucleus sampling parameter (0.0-1.0)         | 1.0            | `--top_p`       |
+
+### Output Format Integration
+
+#### **Enhanced Markdown Transcripts**
+
+```markdown
+# Transcript 20240315_143022
+
+**Persona:** Alex Smith
+**Scenario:** Senior Backend Engineer
+**SUT System Prompt:** prompts/recruiter_v1.txt
+**Random Seed:** 12345
+**Temperature:** 0.7
+**Top-P:** 1.0
+**SUT Model:** gpt-4 - 14:30:22 15/03/2024
+**Proxy Model:** gpt-3.5-turbo - 14:30:22 15/03/2024
+**Conversation Duration:** 45.2s / 120s
+```
+
+#### **Enhanced JSONL Metadata**
+
+```json
+{"type": "metadata", "run_id": "20240315_143022", "persona": "Alex Smith", "scenario": "Senior Backend Engineer", "sut_prompt_path": "prompts/recruiter_v1.txt", "random_seed": 12345, "temperature": 0.7, "top_p": 1.0, "elapsed_time": 45.2, "timeout_reached": false, "timeout_limit": 120, "total_turns": 8}
+{"role": "system", "content": "Hello! I'm here to help you find the right candidate...", "model": "gpt-4", "timestamp": "14:30:22 15/03/2024", "turn_controller": null}
+```
+
+#### **Enhanced Console Output**
+
+```bash
+Saved: output/20240315_143022__alex-smith__senior-backend-engineer__seed_12345.md
+Saved: output/20240315_143022__alex-smith__senior-backend-engineer__seed_12345.jsonl
+Conversation Outcome: completed_successfully (Level: 100%)
+Conversation Duration: 45.2s / 120s
+Sampling Parameters: Seed=12345, Temp=0.7, Top-P=1.0
+Information Gathered: 5 skills, Role: Senior Backend Engineer, Location: Remote
+API Usage: 1250 tokens (4 SUT + 4 Proxy calls)
+Estimated Cost: $0.003750
+```
+
+#### **Enhanced Langfuse Trace Tags**
+
+```
+Alex Smith
+Senior Backend Engineer
+seed:12345
+temp:0.7
+top_p:1.0
+clarify:0.40
+tangent:0.20
+hesitation:0.10
+```
+
+### Filename Integration
+
+Output files now include seed values for easy identification and reproducibility:
+
+```
+output/
+├── 20240315_143022__alex-smith__senior-backend-engineer__seed_12345.md
+├── 20240315_143022__alex-smith__senior-backend-engineer__seed_12345.jsonl
+├── 20240315_143023__sara-mitchell__ai-scepticism__seed_67890.md
+└── 20240315_143023__sara-mitchell__ai-scepticism__seed_67890.jsonl
+```
+
+### Benefits
+
+#### **🔍 Full Observability**
+
+- All sampling parameters visible in every output format
+- Consistent parameter logging across transcripts, JSONL, and traces
+- Immediate parameter visibility in console output
+
+#### **📊 Easy Auditing**
+
+- Parameters logged consistently across all output formats
+- JSONL metadata enables programmatic analysis of parameter effects
+- Langfuse tags allow filtering and analysis by sampling parameters
+
+#### **🎯 Reproducibility**
+
+- Seed values in filenames make it easy to identify specific runs
+- Complete parameter tracking enables exact reproduction of simulations
+- Deterministic runs with same parameters produce identical results
+
+#### **📈 Analysis Ready**
+
+- Structured metadata in JSONL format for data analysis
+- Trace correlation through Langfuse tags
+- Parameter effect analysis across multiple simulation runs
+
 ## 📁 File Structure Details
 
 ### Core Components
@@ -391,17 +497,23 @@ WARNING:simulation_engine:    Context: {'elapsed_time': 125.3, 'timeout_limit': 
 
 ### Output Files
 
-- **`*.md`**: Human-readable conversation transcripts with enhanced failure analysis:
-  - Complete conversation flow
+- **`*.md`**: Human-readable conversation transcripts with enhanced analysis:
+  - Complete conversation flow with sampling parameters in header
   - Turn-by-turn controller decisions
   - Comprehensive failure categorization section
   - Contextual failure information
   - Quality metrics and completion status
-- **`*.jsonl`**: Machine-readable conversation data for analysis
-- **Langfuse traces**: Detailed observability data with spans and evaluations
-  - Enhanced with failure metadata
+  - Seed, temperature, and top_p values prominently displayed
+- **`*.jsonl`**: Machine-readable conversation data with structured metadata:
+  - Metadata header with complete sampling parameters
+  - Conversation turns with model and timestamp information
+  - Structured format for programmatic analysis
+  - Seed values in filenames for easy identification
+- **Langfuse traces**: Detailed observability data with enhanced tagging:
+  - Enhanced trace tags including `temp:` and `top_p:` values
+  - Failure metadata and quality metrics
   - Cost tracking and usage statistics
-  - Conversation outcome analysis
+  - Conversation outcome analysis with sampling parameter correlation
 
 ## 🔍 Use Cases
 
@@ -443,6 +555,16 @@ Continuous monitoring of simulation quality:
 - Automated quality metrics collection
 - Performance trend analysis
 - System health monitoring
+
+### 8. Parameter Analysis & Reproducibility
+
+Comprehensive sampling parameter tracking for:
+
+- Analyzing the effect of temperature and top_p on conversation quality
+- Reproducing exact simulation runs with identical parameters
+- Comparing performance across different sampling configurations
+- Parameter optimization for specific use cases
+- Research and experimentation with different AI model settings
 
 ## 🛠️ Development
 
