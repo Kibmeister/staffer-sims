@@ -21,9 +21,10 @@ logger = logging.getLogger(__name__)
 class SimulationEngine:
     """Main engine for running persona simulations"""
     
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, sut_prompt_path: str = "prompts/recruiter_v1.txt"):
         self.settings = settings
         self.analyzer = ConversationAnalyzer()
+        self.sut_prompt_path = sut_prompt_path
         
         # Initialize clients
         self.sut_client = self._create_sut_client()
@@ -119,7 +120,7 @@ class SimulationEngine:
             f"# Transcript {run_id}",
             f"**Persona:** {persona['name']}",
             f"**Scenario:** {scenario['title']}",
-            ""
+            f"**SUT System Prompt:** {self.sut_prompt_path}"
         ]
         
         # Extract model and timestamp information for each role (SUT and Proxy)
@@ -455,12 +456,12 @@ Do not add any second question in the same message.
     def _load_recruiter_prompt(self) -> str:
         """Load the recruiter system prompt from file"""
         try:
-            prompt_path = Path("prompts/recruiter_v1.txt")
+            prompt_path = Path(self.sut_prompt_path)
             if prompt_path.exists():
                 with open(prompt_path, 'r', encoding='utf-8') as f:
                     return f.read()
             else:
-                logger.warning("Recruiter prompt file not found, using fallback")
+                logger.warning(f"Recruiter prompt file not found at {self.sut_prompt_path}, using fallback")
                 return "You are a recruiter assistant. Ask questions to understand the hiring needs and gather information progressively. Do not provide complete job descriptions immediately."
         except Exception as e:
             logger.error(f"Error loading recruiter prompt: {e}")

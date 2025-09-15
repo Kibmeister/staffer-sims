@@ -369,6 +369,7 @@ Control sampling for reproducibility vs creativity:
   ```bash
   python simulate.py --persona personas/alex_smith.yml \
     --scenario scenarios/referralCrisis_seniorBackendEngineer.yml \
+    --sut-prompt prompts/recruiter_v1.txt
     --seed 12345678 --temperature 0.0 --top_p 1.0
   ```
 - Environment:

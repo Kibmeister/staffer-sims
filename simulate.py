@@ -48,7 +48,7 @@ def simulate(args):
     scenario = load_yaml(args.scenario)
     
     # Initialize simulation engine
-    engine = SimulationEngine(settings)
+    engine = SimulationEngine(settings, sut_prompt_path=args.sut_prompt)
     
     # Run simulation
     output_dir = getattr(args, 'output', None) or settings.output_dir
@@ -88,5 +88,6 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, help="Deterministic RNG seed for per-turn decisions")
     parser.add_argument("--temperature", type=float, help="Sampling temperature (e.g., 0.0..1.2)")
     parser.add_argument("--top_p", type=float, help="Nucleus sampling top_p (0..1)")
+    parser.add_argument("--sut-prompt", default="prompts/recruiter_v1.txt", help="Path to SUT system prompt file (default: prompts/recruiter_v1.txt)")
     args = parser.parse_args()
     simulate(args)
