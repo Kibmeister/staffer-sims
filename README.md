@@ -248,6 +248,16 @@ Support for multiple API providers:
 - Custom API endpoints
 - Easy configuration switching
 
+### ⚡ Optimized Performance
+
+Connection pooling and performance optimizations:
+
+- **Connection Pooling**: Reuses HTTP connections for multiple requests
+- **Session Management**: Optimized `requests.Session()` with connection pools
+- **Configurable Pool Settings**: Customizable pool size and connection limits
+- **Automatic Cleanup**: Proper connection cleanup after simulations
+- **Timeout Handling**: 30-second request timeouts to prevent hanging
+
 ## 📁 File Structure Details
 
 ### Core Components

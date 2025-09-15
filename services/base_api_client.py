@@ -22,6 +22,10 @@ class APIClientConfig:
     max_retries: int = 3
     backoff_factor: float = 1.0
     model: Optional[str] = None
+    # Connection pooling settings
+    pool_connections: int = 10  # Number of connection pools to cache
+    pool_maxsize: int = 20  # Maximum number of connections to save in the pool
+    pool_block: bool = False  # Whether to block when no free connections available
 
 class APIError(Exception):
     """Base exception for API errors"""
@@ -44,9 +48,10 @@ class BaseAPIClient:
         logger.debug(f"Initialized {self.__class__.__name__} with URL: {config.url}")
     
     def _create_session(self) -> requests.Session:
-        """Create a requests session with retry strategy"""
+        """Create a requests session with optimized connection pooling and retry strategy"""
         session = requests.Session()
         
+        # Configure retry strategy
         retry_strategy = Retry(
             total=self.config.max_retries,
             backoff_factor=self.config.backoff_factor,
@@ -54,9 +59,19 @@ class BaseAPIClient:
             allowed_methods=["POST"]
         )
         
-        adapter = HTTPAdapter(max_retries=retry_strategy)
+        # Create HTTPAdapter with connection pooling optimization
+        adapter = HTTPAdapter(
+            max_retries=retry_strategy,
+            pool_connections=self.config.pool_connections,
+            pool_maxsize=self.config.pool_maxsize,
+            pool_block=self.config.pool_block
+        )
+        
+        # Mount adapters for both HTTP and HTTPS
         session.mount("http://", adapter)
         session.mount("https://", adapter)
+        
+        logger.debug(f"Created session with connection pool (connections: {self.config.pool_connections}, maxsize: {self.config.pool_maxsize})")
         
         return session
     
@@ -116,3 +131,17 @@ class BaseAPIClient:
         content = self._extract_content(response_data)
         logger.debug(f"Extracted content length: {len(content)}")
         return content
+    
+    def close(self):
+        """Close the session and cleanup connections"""
+        if hasattr(self, 'session') and self.session:
+            logger.debug(f"Closing session for {self.__class__.__name__}")
+            self.session.close()
+    
+    def __enter__(self):
+        """Context manager entry"""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - cleanup connections"""
+        self.close()

@@ -84,6 +84,16 @@ python simulate.py \
   --use-controller False
 ```
 
+### Performance Optimization
+
+The system includes several performance optimizations:
+
+- **Connection Pooling**: HTTP connections are reused across multiple API requests
+- **Session Management**: Each API client uses an optimized `requests.Session()`
+- **Configurable Pool Size**: Control the number of cached connections via environment variables
+- **Automatic Cleanup**: Connections are properly closed after simulation completion
+- **Request Timeouts**: 30-second timeouts prevent hanging requests
+
 ## 📁 Configuration Structure
 
 ```
@@ -121,22 +131,24 @@ config/
 
 ### Optional Environment Variables
 
-| Variable          | Default                                         | Description                                       |
-| ----------------- | ----------------------------------------------- | ------------------------------------------------- |
-| `ENVIRONMENT`     | `development`                                   | Environment name (development/staging/production) |
-| `DEBUG`           | `false`                                         | Enable debug mode                                 |
-| `LOG_LEVEL`       | `INFO`                                          | Logging level (DEBUG/INFO/WARNING/ERROR)          |
-| `SUT_URL`         | `http://localhost:8080/sut/chat`                | SUT service URL                                   |
-| `PROXY_URL`       | `https://openrouter.ai/api/v1/chat/completions` | Proxy service URL                                 |
-| `LANGFUSE_HOST`   | `https://cloud.langfuse.com`                    | Langfuse host URL                                 |
-| `MAX_TURNS`       | `18`                                            | Maximum conversation turns                        |
-| `REQUEST_TIMEOUT` | `30`                                            | Individual API request timeout in seconds         |
-| `RETRY_ATTEMPTS`  | `3`                                             | Number of retry attempts                          |
-| `RETRY_DELAY`     | `1.0`                                           | Delay between retries in seconds                  |
-| `OUTPUT_DIR`      | `output`                                        | Output directory for simulation results           |
-| `RNG_SEED`        | None                                            | Default RNG seed for deterministic runs           |
-| `TEMPERATURE`     | `0.7`                                           | Default sampling temperature                      |
-| `TOP_P`           | `1.0`                                           | Default nucleus sampling top_p                    |
+| Variable           | Default                                         | Description                                       |
+| ------------------ | ----------------------------------------------- | ------------------------------------------------- |
+| `ENVIRONMENT`      | `development`                                   | Environment name (development/staging/production) |
+| `DEBUG`            | `false`                                         | Enable debug mode                                 |
+| `LOG_LEVEL`        | `INFO`                                          | Logging level (DEBUG/INFO/WARNING/ERROR)          |
+| `SUT_URL`          | `http://localhost:8080/sut/chat`                | SUT service URL                                   |
+| `PROXY_URL`        | `https://openrouter.ai/api/v1/chat/completions` | Proxy service URL                                 |
+| `LANGFUSE_HOST`    | `https://cloud.langfuse.com`                    | Langfuse host URL                                 |
+| `MAX_TURNS`        | `18`                                            | Maximum conversation turns                        |
+| `REQUEST_TIMEOUT`  | `30`                                            | Individual API request timeout in seconds         |
+| `RETRY_ATTEMPTS`   | `3`                                             | Number of retry attempts                          |
+| `RETRY_DELAY`      | `1.0`                                           | Delay between retries in seconds                  |
+| `OUTPUT_DIR`       | `output`                                        | Output directory for simulation results           |
+| `RNG_SEED`         | None                                            | Default RNG seed for deterministic runs           |
+| `TEMPERATURE`      | `0.7`                                           | Default sampling temperature                      |
+| `TOP_P`            | `1.0`                                           | Default nucleus sampling top_p                    |
+| `POOL_CONNECTIONS` | `10`                                            | Number of connection pools to cache               |
+| `POOL_MAXSIZE`     | `20`                                            | Maximum connections to save in each pool          |
 
 ## 🌍 Environment-Specific Configuration
 

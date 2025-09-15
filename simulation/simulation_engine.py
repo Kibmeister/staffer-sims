@@ -31,7 +31,8 @@ class SimulationEngine:
         self.proxy_client = self._create_proxy_client()
         self.langfuse_service = self._create_langfuse_service()
         
-        logger.info("Simulation engine initialized")
+        logger.info("Simulation engine initialized with connection pooling (pool_connections={}, pool_maxsize={})".format(
+            self.settings.pool_connections, self.settings.pool_maxsize))
     
     def _create_sut_client(self) -> SUTClient:
         """Create SUT client from settings"""
@@ -42,7 +43,10 @@ class SimulationEngine:
             timeout=self.settings.request_timeout,
             connection_timeout=10,  # 10 seconds for connection establishment
             max_retries=self.settings.retry_attempts,
-            model=sut_config.get("model")
+            model=sut_config.get("model"),
+            pool_connections=self.settings.pool_connections,
+            pool_maxsize=self.settings.pool_maxsize,
+            pool_block=False
         )
         return SUTClient(config)
     
@@ -55,7 +59,10 @@ class SimulationEngine:
             timeout=self.settings.request_timeout,
             connection_timeout=10,  # 10 seconds for connection establishment
             max_retries=self.settings.retry_attempts,
-            model=proxy_config.get("model")
+            model=proxy_config.get("model"),
+            pool_connections=self.settings.pool_connections,
+            pool_maxsize=self.settings.pool_maxsize,
+            pool_block=False
         )
         return ProxyClient(config)
     
@@ -370,7 +377,30 @@ class SimulationEngine:
             
             timeout_msg = " (TIMEOUT)" if timeout_reached else ""
             logger.info(f"Simulation completed: {final_outcome.status} ({final_outcome.completion_level}%) in {final_elapsed_time:.1f}s{timeout_msg}")
+            
+            # Cleanup connections after simulation
+            self._cleanup_connections()
+            
             return results
+    
+    def _cleanup_connections(self):
+        """Cleanup API client connections"""
+        try:
+            if hasattr(self.sut_client, 'close'):
+                self.sut_client.close()
+            if hasattr(self.proxy_client, 'close'):
+                self.proxy_client.close()
+            logger.debug("API client connections cleaned up")
+        except Exception as e:
+            logger.warning(f"Error during connection cleanup: {e}")
+    
+    def __enter__(self):
+        """Context manager entry"""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - cleanup connections"""
+        self._cleanup_connections()
     
     def _handle_sut_turn(self, turn_idx: int, messages: List[Dict[str, str]], 
                         system_prompt: str, temperature: float | None = None, top_p: float | None = None) -> tuple[str, str, str]:

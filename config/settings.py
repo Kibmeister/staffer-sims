@@ -33,6 +33,10 @@ class Settings:
     request_timeout: int = 30  # 30-second timeout for individual API requests
     retry_attempts: int = 3
     retry_delay: float = 1.0
+    
+    # Connection Pooling Settings
+    pool_connections: int = 10  # Number of connection pools to cache
+    pool_maxsize: int = 20  # Maximum number of connections to save in the pool
 
     # Simulation Behavior
     rng_seed: Optional[int] = None
@@ -114,6 +118,10 @@ class Settings:
             request_timeout=int(os.getenv("REQUEST_TIMEOUT", "30")),
             retry_attempts=int(os.getenv("RETRY_ATTEMPTS", "3")),
             retry_delay=float(os.getenv("RETRY_DELAY", "1.0")),
+            
+            # Connection Pooling Settings
+            pool_connections=int(os.getenv("POOL_CONNECTIONS", "10")),
+            pool_maxsize=int(os.getenv("POOL_MAXSIZE", "20")),
             
             # Simulation Behavior
             rng_seed=int(os.getenv("RNG_SEED", "0")) if os.getenv("RNG_SEED") else None,

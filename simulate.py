@@ -50,31 +50,30 @@ def simulate(args):
     scenario = dict(scenario)
     scenario['use_controller'] = args.use_controller
     
-    # Initialize simulation engine
-    engine = SimulationEngine(settings, sut_prompt_path=args.sut_prompt)
-    
-    # Run simulation
-    output_dir = getattr(args, 'output', None) or settings.output_dir
-    # Inject RNG seed override if provided via CLI or env-backed settings
-    if getattr(args, 'seed', None) is not None:
-        scenario = dict(scenario)
-        scenario['rng_seed_override'] = int(args.seed)
-    elif settings.rng_seed is not None:
-        scenario = dict(scenario)
-        scenario['rng_seed_override'] = int(settings.rng_seed)
+    # Initialize simulation engine with context manager for proper cleanup
+    with SimulationEngine(settings, sut_prompt_path=args.sut_prompt) as engine:
+        # Run simulation
+        output_dir = getattr(args, 'output', None) or settings.output_dir
+        # Inject RNG seed override if provided via CLI or env-backed settings
+        if getattr(args, 'seed', None) is not None:
+            scenario = dict(scenario)
+            scenario['rng_seed_override'] = int(args.seed)
+        elif settings.rng_seed is not None:
+            scenario = dict(scenario)
+            scenario['rng_seed_override'] = int(settings.rng_seed)
 
-    # Allow temperature/top_p/timeout overrides
-    if getattr(args, 'temperature', None) is not None:
-        scenario = dict(scenario)
-        scenario['temperature_override'] = float(args.temperature)
-    if getattr(args, 'top_p', None) is not None:
-        scenario = dict(scenario)
-        scenario['top_p_override'] = float(args.top_p)
-    if getattr(args, 'timeout', None) is not None:
-        scenario = dict(scenario)
-        scenario['conversation_timeout'] = int(args.timeout)
+        # Allow temperature/top_p/timeout overrides
+        if getattr(args, 'temperature', None) is not None:
+            scenario = dict(scenario)
+            scenario['temperature_override'] = float(args.temperature)
+        if getattr(args, 'top_p', None) is not None:
+            scenario = dict(scenario)
+            scenario['top_p_override'] = float(args.top_p)
+        if getattr(args, 'timeout', None) is not None:
+            scenario = dict(scenario)
+            scenario['conversation_timeout'] = int(args.timeout)
 
-    results = engine.run_simulation(persona, scenario, output_dir)
+        results = engine.run_simulation(persona, scenario, output_dir)
     
     # Print results summary
     print(f"Saved: {results['transcript_path']}")
