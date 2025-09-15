@@ -135,7 +135,7 @@ class ProxyClient(BaseAPIClient):
         return "\n".join(system_parts)
     
     def send_persona_message(self, persona: Dict[str, Any], scenario: Dict[str, Any], 
-                           messages: List[Dict[str, str]]) -> str:
+                           messages: List[Dict[str, str]]) -> tuple[str, Dict[str, Any]]:
         """
         Send persona message through proxy API
         
@@ -145,7 +145,7 @@ class ProxyClient(BaseAPIClient):
             messages: Conversation messages
             
         Returns:
-            Persona response content
+            Tuple of (Persona response content, usage data)
         """
         # Build system prompt from persona and scenario only
         system_prompt = self._build_persona_system_prompt(persona, scenario)
@@ -191,9 +191,9 @@ class ProxyClient(BaseAPIClient):
         logger.debug(f"Proxy payload keys: {list(payload.keys())}")
         
         try:
-            response = self.send_message(payload)
-            logger.info(f"Persona response received (length: {len(response)})")
-            return response
+            response, usage = self.send_message(payload)
+            logger.info(f"Persona response received (length: {len(response)}, tokens: {usage['total_tokens']})")
+            return response, usage
         except Exception as e:
             logger.error(f"Proxy request failed: {e}")
             raise

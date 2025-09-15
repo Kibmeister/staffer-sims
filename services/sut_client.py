@@ -32,7 +32,7 @@ class SUTClient(BaseAPIClient):
         logger.error(f"SUT response missing expected keys: {response_data}")
         raise ValueError("SUT response missing 'message' or 'choices[0][\"message\"][\"content\"]' key")
     
-    def send_conversation(self, messages: List[Dict[str, str]], temperature: float | None = None, top_p: float | None = None) -> str:
+    def send_conversation(self, messages: List[Dict[str, str]], temperature: float | None = None, top_p: float | None = None) -> tuple[str, Dict[str, Any]]:
         """
         Send conversation to SUT endpoint
         
@@ -40,7 +40,7 @@ class SUTClient(BaseAPIClient):
             messages: List of conversation messages in OpenAI format
             
         Returns:
-            SUT response content
+            Tuple of (SUT response content, usage data)
         """
         # Prepare payload for SUT endpoint
         payload = {"messages": messages}
@@ -60,14 +60,14 @@ class SUTClient(BaseAPIClient):
         logger.debug(f"SUT payload: {payload}")
         
         try:
-            response = self.send_message(payload)
-            logger.info(f"SUT response received (length: {len(response)})")
-            return response
+            response, usage = self.send_message(payload)
+            logger.info(f"SUT response received (length: {len(response)}, tokens: {usage['total_tokens']})")
+            return response, usage
         except Exception as e:
             logger.error(f"SUT request failed: {e}")
             raise
     
-    def send_with_system_prompt(self, messages: List[Dict[str, str]], system_prompt: str, temperature: float | None = None, top_p: float | None = None) -> str:
+    def send_with_system_prompt(self, messages: List[Dict[str, str]], system_prompt: str, temperature: float | None = None, top_p: float | None = None) -> tuple[str, Dict[str, Any]]:
         """
         Send conversation with system prompt to SUT
         
@@ -76,7 +76,7 @@ class SUTClient(BaseAPIClient):
             system_prompt: System prompt to prepend
             
         Returns:
-            SUT response content
+            Tuple of (SUT response content, usage data)
         """
         # Prepend system prompt to messages
         messages_with_system = [

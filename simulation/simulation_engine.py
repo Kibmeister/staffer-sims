@@ -9,6 +9,7 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, List
 from pathlib import Path
+from dataclasses import dataclass
 
 from services import SUTClient, ProxyClient, LangfuseService
 from services.base_api_client import APIClientConfig
@@ -17,6 +18,16 @@ from analysis import ConversationAnalyzer
 from config.settings import Settings
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class UsageStats:
+    """Track API usage and costs"""
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_tokens: int = 0
+    sut_calls: int = 0
+    proxy_calls: int = 0
+    estimated_cost: float = 0.0
 
 class SimulationEngine:
     """Main engine for running persona simulations"""
@@ -30,6 +41,9 @@ class SimulationEngine:
         self.sut_client = self._create_sut_client()
         self.proxy_client = self._create_proxy_client()
         self.langfuse_service = self._create_langfuse_service()
+        
+        # Initialize usage tracking
+        self.usage_stats = UsageStats()
         
         logger.info("Simulation engine initialized with connection pooling (pool_connections={}, pool_maxsize={})".format(
             self.settings.pool_connections, self.settings.pool_maxsize))
@@ -372,7 +386,15 @@ class SimulationEngine:
                 "jsonl_path": jsonl_path,
                 "elapsed_time": final_elapsed_time,
                 "timeout_reached": timeout_reached,
-                "timeout_limit": timeout_seconds
+                "timeout_limit": timeout_seconds,
+                "usage_stats": {
+                    "total_tokens": self.usage_stats.total_tokens,
+                    "input_tokens": self.usage_stats.total_input_tokens,
+                    "output_tokens": self.usage_stats.total_output_tokens,
+                    "sut_calls": self.usage_stats.sut_calls,
+                    "proxy_calls": self.usage_stats.proxy_calls,
+                    "estimated_cost": self.usage_stats.estimated_cost
+                }
             }
             
             timeout_msg = " (TIMEOUT)" if timeout_reached else ""
@@ -402,6 +424,44 @@ class SimulationEngine:
         """Context manager exit - cleanup connections"""
         self._cleanup_connections()
     
+    def _estimate_cost(self, input_tokens: int, output_tokens: int, model: str) -> float:
+        """Estimate cost based on tokens and model"""
+        # Simple cost estimation - GPT-4o-mini pricing as baseline
+        # Input: $0.00015 per 1K tokens, Output: $0.0006 per 1K tokens
+        if "gpt-4o-mini" in model.lower():
+            input_cost = (input_tokens / 1000) * 0.00015
+            output_cost = (output_tokens / 1000) * 0.0006
+        elif "gpt-4o" in model.lower():
+            # GPT-4o pricing: Input $0.005, Output $0.015 per 1K tokens
+            input_cost = (input_tokens / 1000) * 0.005
+            output_cost = (output_tokens / 1000) * 0.015
+        else:
+            # Default to GPT-4o-mini pricing
+            input_cost = (input_tokens / 1000) * 0.00015
+            output_cost = (output_tokens / 1000) * 0.0006
+        
+        return input_cost + output_cost
+    
+    def _update_usage_stats(self, usage: Dict[str, Any], model: str, client_type: str):
+        """Update usage statistics"""
+        input_tokens = usage["input_tokens"]
+        output_tokens = usage["output_tokens"]
+        total_tokens = usage["total_tokens"]
+        
+        self.usage_stats.total_input_tokens += input_tokens
+        self.usage_stats.total_output_tokens += output_tokens
+        self.usage_stats.total_tokens += total_tokens
+        
+        if client_type == "sut":
+            self.usage_stats.sut_calls += 1
+        elif client_type == "proxy":
+            self.usage_stats.proxy_calls += 1
+        
+        cost = self._estimate_cost(input_tokens, output_tokens, model)
+        self.usage_stats.estimated_cost += cost
+        
+        logger.debug(f"{client_type.upper()} usage: {total_tokens} tokens, ${cost:.6f}, running total: ${self.usage_stats.estimated_cost:.6f}")
+    
     def _handle_sut_turn(self, turn_idx: int, messages: List[Dict[str, str]], 
                         system_prompt: str, temperature: float | None = None, top_p: float | None = None) -> tuple[str, str, str]:
         """Handle a single SUT turn
@@ -428,7 +488,7 @@ class SimulationEngine:
             # Capture timestamp before API call
             timestamp = datetime.now().strftime("%H:%M:%S %d/%m/%Y")
             
-            sut_reply = self.sut_client.send_conversation(messages_for_sut, temperature=temperature, top_p=top_p)
+            sut_reply, sut_usage = self.sut_client.send_conversation(messages_for_sut, temperature=temperature, top_p=top_p)
             
             # Get model information from SUT client config
             model_name = self.sut_client.config.model or "unknown-model"
@@ -440,7 +500,20 @@ class SimulationEngine:
                     sut_reply = self._enforce_single_question_first_turn(sut_reply)
                 else:
                     sut_reply = self._enforce_single_question_all_turns(sut_reply)
-            sut_span.update(output={"text": sut_reply})
+            
+            # Update usage statistics
+            self._update_usage_stats(sut_usage, model_name, "sut")
+            
+            # Update Langfuse span with usage data
+            sut_span.update(
+                output={"text": sut_reply},
+                usage={
+                    "input": sut_usage["input_tokens"],
+                    "output": sut_usage["output_tokens"],
+                    "total": sut_usage["total_tokens"]
+                },
+                model=model_name
+            )
             return sut_reply, model_name, timestamp
     
     def _handle_proxy_turn(self, turn_idx: int, messages: List[Dict[str, str]], 
@@ -465,7 +538,7 @@ class SimulationEngine:
             # Capture timestamp before API call
             timestamp = datetime.now().strftime("%H:%M:%S %d/%m/%Y")
             
-            proxy_reply = self.proxy_client.send_persona_message(
+            proxy_reply, proxy_usage = self.proxy_client.send_persona_message(
                 persona, scenario, messages_for_proxy
             )
             
@@ -578,7 +651,19 @@ class SimulationEngine:
                 if tangent_allowed:
                     proxy_reply += " By the way, did you know... Anyway, "
                     proxy_reply += "What were we discussing?"
-            proxy_span.update(output={"text": proxy_reply})
+            # Update usage statistics
+            self._update_usage_stats(proxy_usage, model_name, "proxy")
+            
+            # Update Langfuse span with usage data
+            proxy_span.update(
+                output={"text": proxy_reply},
+                usage={
+                    "input": proxy_usage["input_tokens"],
+                    "output": proxy_usage["output_tokens"],
+                    "total": proxy_usage["total_tokens"]
+                },
+                model=model_name
+            )
             return proxy_reply, model_name, timestamp
 
     def _sanitize_messages_for_proxy(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:

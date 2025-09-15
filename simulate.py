@@ -84,6 +84,12 @@ def simulate(args):
     
     info = results['information_gathered']
     print(f"Information Gathered: {len(info['skills_mentioned'])} skills, Role: {info['role_type']}, Location: {info['location']}")
+    
+    # Print usage and cost information
+    usage = results.get('usage_stats', {})
+    print(f"API Usage: {usage.get('total_tokens', 0)} tokens ({usage.get('sut_calls', 0)} SUT + {usage.get('proxy_calls', 0)} Proxy calls)")
+    print(f"Estimated Cost: ${usage.get('estimated_cost', 0):.6f}")
+    
     print("Evaluations: Sent to Langfuse for processing")
 
 

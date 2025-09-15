@@ -125,12 +125,31 @@ class BaseAPIClient:
         logger.error(f"Unexpected response format: {response_data}")
         raise APIError("Response missing 'message' or 'choices[0][\"message\"][\"content\"]' key")
     
-    def send_message(self, payload: Dict[str, Any]) -> str:
-        """Send message and return extracted content"""
+    def _extract_usage(self, response_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract usage data from API response"""
+        usage = response_data.get("usage", {})
+        
+        # Standardize usage format
+        extracted_usage = {
+            "input_tokens": usage.get("prompt_tokens", 0),
+            "output_tokens": usage.get("completion_tokens", 0),
+            "total_tokens": usage.get("total_tokens", 0)
+        }
+        
+        # Calculate total if not provided
+        if extracted_usage["total_tokens"] == 0:
+            extracted_usage["total_tokens"] = extracted_usage["input_tokens"] + extracted_usage["output_tokens"]
+        
+        logger.debug(f"Extracted usage: {extracted_usage}")
+        return extracted_usage
+    
+    def send_message(self, payload: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
+        """Send message and return extracted content and usage data"""
         response_data = self._make_request(payload)
         content = self._extract_content(response_data)
-        logger.debug(f"Extracted content length: {len(content)}")
-        return content
+        usage = self._extract_usage(response_data)
+        logger.debug(f"Extracted content length: {len(content)}, tokens: {usage['total_tokens']}")
+        return content, usage
     
     def close(self):
         """Close the session and cleanup connections"""
