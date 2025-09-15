@@ -100,26 +100,34 @@ python simulate.py --persona personas/alex_smith.yml --scenario scenarios/referr
 
 ## 🖥️ CLI Arguments
 
-The `simulate.py` script supports the following command-line arguments:
+The `simulate.py` script supports comprehensive command-line arguments with robust validation:
 
 ### Required Arguments
 
-| Argument     | Type   | Description                | Example                                              |
-| ------------ | ------ | -------------------------- | ---------------------------------------------------- |
-| `--persona`  | string | Path to persona YAML file  | `personas/alex_smith.yml`                            |
-| `--scenario` | string | Path to scenario YAML file | `scenarios/referralCrisis_seniorBackendEngineer.yml` |
+| Argument     | Type   | Description                | Validation                                             | Example                                              |
+| ------------ | ------ | -------------------------- | ------------------------------------------------------ | ---------------------------------------------------- |
+| `--persona`  | string | Path to persona YAML file  | File exists, readable, valid YAML with required fields | `personas/alex_smith.yml`                            |
+| `--scenario` | string | Path to scenario YAML file | File exists, readable, valid YAML with required fields | `scenarios/referralCrisis_seniorBackendEngineer.yml` |
 
 ### Optional Arguments
 
-| Argument           | Type    | Default                    | Description                                   | Example                                   |
-| ------------------ | ------- | -------------------------- | --------------------------------------------- | ----------------------------------------- |
-| `--output`         | string  | `output`                   | Output directory for transcripts              | `--output my_results`                     |
-| `--seed`           | integer | auto-generated             | Deterministic RNG seed for per-turn decisions | `--seed 12345678`                         |
-| `--temperature`    | float   | `0.7`                      | Sampling temperature (0.0-1.2)                | `--temperature 0.0`                       |
-| `--top_p`          | float   | `1.0`                      | Nucleus sampling top_p (0.0-1.0)              | `--top_p 0.9`                             |
-| `--sut-prompt`     | string  | `prompts/recruiter_v1.txt` | Path to SUT system prompt file                | `--sut-prompt prompts/recruiter_v1.2.txt` |
-| `--use-controller` | boolean | `True`                     | Enable or disable the controller logic        | `--use-controller False`                  |
-| `--timeout`        | integer | `120`                      | Maximum conversation duration in seconds      | `--timeout 180`                           |
+| Argument           | Type    | Default                    | Validation            | Description                                   | Example                                   |
+| ------------------ | ------- | -------------------------- | --------------------- | --------------------------------------------- | ----------------------------------------- |
+| `--output`         | string  | `output`                   | Directory creation    | Output directory for transcripts              | `--output my_results`                     |
+| `--seed`           | integer | auto-generated             | Positive integer      | Deterministic RNG seed for per-turn decisions | `--seed 12345678`                         |
+| `--temperature`    | float   | `0.7`                      | 0.0-2.0 range         | Sampling temperature for response creativity  | `--temperature 0.0`                       |
+| `--top_p`          | float   | `1.0`                      | 0.0-1.0 range         | Nucleus sampling top_p parameter              | `--top_p 0.9`                             |
+| `--sut-prompt`     | string  | `prompts/recruiter_v1.txt` | File exists, readable | Path to SUT system prompt file                | `--sut-prompt prompts/recruiter_v1.2.txt` |
+| `--use-controller` | boolean | `True`                     | true/false            | Enable or disable the controller logic        | `--use-controller False`                  |
+| `--timeout`        | integer | `120`                      | Positive integer      | Maximum conversation duration in seconds      | `--timeout 180`                           |
+
+### Validation Features
+
+- **File Validation**: All file paths are checked for existence, readability, and proper format
+- **YAML Validation**: Syntax and structure validation with clear error messages
+- **Range Validation**: Numeric parameters are validated against acceptable ranges
+- **Type Validation**: All arguments are type-checked before processing
+- **Early Failure**: Validation occurs before simulation starts to prevent wasted resources
 
 ### Usage Examples
 
@@ -161,6 +169,42 @@ python simulate.py \
   --use-controller False \
   --timeout 300
 ```
+
+## 🛡️ Error Handling & Structured Logging
+
+Staffer Sims provides comprehensive error handling and structured logging for production use:
+
+### Error Handling
+
+- **Validation Errors**: Clear error messages with ❌ prefix for easy identification
+- **File Errors**: Specific messages for missing files, permission issues, and YAML syntax errors
+- **Parameter Errors**: Range validation with actionable feedback
+- **Exit Codes**:
+  - `0` - Success
+  - `1` - General errors (validation failures, file issues)
+  - `130` - Keyboard interrupt (SIGINT)
+
+### Structured Logging
+
+- **INFO Level**: Parameters, output paths, execution status
+- **DEBUG Level**: Configuration details, payload summaries (keys only for security)
+- **WARNING Level**: Non-fatal issues (failures detected during simulation)
+- **ERROR Level**: Fatal errors with stack traces
+
+### Example Error Messages
+
+```bash
+❌ Error: Persona file not found: personas/missing.yml
+❌ Error: Temperature must be between 0.0 and 2.0, got 3.0
+❌ Error: Invalid YAML in scenario file scenarios/broken.yml: while parsing a block mapping
+```
+
+### CI/CD Integration
+
+- **Non-zero exit codes** for automated failure detection
+- **Structured log format** for parsing by CI systems
+- **Early validation** prevents wasted resources on invalid configurations
+- **Clear error messages** for quick debugging
 
 ## ⚙️ Configuration
 

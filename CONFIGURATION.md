@@ -35,17 +35,17 @@ This guide explains how to set up and manage environment configuration for the S
 
 ### Available CLI Arguments
 
-| Argument           | Type    | Required | Default                    | Description                                  |
-| ------------------ | ------- | -------- | -------------------------- | -------------------------------------------- |
-| `--persona`        | string  | ✅       | -                          | Path to persona YAML file                    |
-| `--scenario`       | string  | ✅       | -                          | Path to scenario YAML file                   |
-| `--output`         | string  | ❌       | `output`                   | Output directory for transcripts             |
-| `--seed`           | integer | ❌       | auto-generated             | Deterministic RNG seed for reproducible runs |
-| `--temperature`    | float   | ❌       | `0.7`                      | Sampling temperature (0.0-1.2)               |
-| `--top_p`          | float   | ❌       | `1.0`                      | Nucleus sampling top_p (0.0-1.0)             |
-| `--sut-prompt`     | string  | ❌       | `prompts/recruiter_v1.txt` | Path to SUT system prompt file               |
-| `--use-controller` | boolean | ❌       | `True`                     | Enable/disable controller logic              |
-| `--timeout`        | integer | ❌       | `120`                      | Maximum conversation duration (seconds)      |
+| Argument           | Type    | Required | Default                    | Validation                                             | Description                                  |
+| ------------------ | ------- | -------- | -------------------------- | ------------------------------------------------------ | -------------------------------------------- |
+| `--persona`        | string  | ✅       | -                          | File exists, readable, valid YAML with required fields | Path to persona YAML file                    |
+| `--scenario`       | string  | ✅       | -                          | File exists, readable, valid YAML with required fields | Path to scenario YAML file                   |
+| `--output`         | string  | ❌       | `output`                   | Directory creation                                     | Output directory for transcripts             |
+| `--seed`           | integer | ❌       | auto-generated             | Positive integer                                       | Deterministic RNG seed for reproducible runs |
+| `--temperature`    | float   | ❌       | `0.7`                      | 0.0-2.0 range                                          | Sampling temperature for response creativity |
+| `--top_p`          | float   | ❌       | `1.0`                      | 0.0-1.0 range                                          | Nucleus sampling top_p parameter             |
+| `--sut-prompt`     | string  | ❌       | `prompts/recruiter_v1.txt` | File exists, readable                                  | Path to SUT system prompt file               |
+| `--use-controller` | boolean | ❌       | `True`                     | true/false                                             | Enable/disable controller logic              |
+| `--timeout`        | integer | ❌       | `120`                      | Positive integer                                       | Maximum conversation duration (seconds)      |
 
 ### CLI Usage Examples
 
@@ -82,6 +82,156 @@ python simulate.py \
   --persona personas/alex_smith.yml \
   --scenario scenarios/referralCrisis_seniorBackendEngineer.yml \
   --use-controller False
+```
+
+### Validation Examples
+
+**File validation errors:**
+
+```bash
+# Missing persona file
+python simulate.py --persona missing.yml --scenario test.yml
+# Output: ❌ Error: Persona file not found: missing.yml
+
+# Invalid YAML syntax
+python simulate.py --persona broken.yml --scenario test.yml
+# Output: ❌ Error: Invalid YAML in persona file broken.yml: while parsing a block mapping
+```
+
+**Parameter validation errors:**
+
+```bash
+# Invalid temperature range
+python simulate.py --persona test.yml --scenario test.yml --temperature 3.0
+# Output: ❌ Error: Temperature must be between 0.0 and 2.0, got 3.0
+
+# Invalid seed value
+python simulate.py --persona test.yml --scenario test.yml --seed -1
+# Output: ❌ Error: Seed must be a positive integer, got -1
+```
+
+**Help and usage information:**
+
+```bash
+# Show detailed help with examples
+python simulate.py --help
+
+# Show help for specific argument
+python simulate.py --help | grep -A 5 "temperature"
+```
+
+## 🛡️ CLI Validation & Error Handling
+
+Staffer Sims provides enterprise-grade validation and error handling for robust CLI operation:
+
+### File Validation
+
+All file inputs are validated before processing:
+
+```bash
+# File existence and readability checks
+❌ Error: Persona file not found: personas/missing.yml
+❌ Error: Scenario file is not readable: scenarios/protected.yml
+❌ Error: SUT prompt path is not a file: prompts/directory
+```
+
+### YAML Validation
+
+YAML files are validated for syntax and structure:
+
+```bash
+# YAML syntax validation
+❌ Error: Invalid YAML in persona file personas/broken.yml: while parsing a block mapping
+
+# Structure validation
+❌ Error: Persona file missing required field 'name'
+❌ Error: Scenario file must contain a YAML dictionary, got list
+```
+
+### Parameter Validation
+
+Numeric parameters are validated against acceptable ranges:
+
+```bash
+# Range validation
+❌ Error: Temperature must be between 0.0 and 2.0, got 3.0
+❌ Error: Top-P must be between 0.0 and 1.0, got 1.5
+❌ Error: Seed must be a positive integer, got -1
+❌ Error: Timeout must be a positive integer, got 0
+```
+
+### Structured Logging
+
+Logging is configured with appropriate levels for different use cases:
+
+#### **INFO Level Logging**
+
+```bash
+2024-03-15 14:30:22 - simulate - INFO - Starting simulation in development environment
+2024-03-15 14:30:22 - simulate - INFO - Persona file: personas/alex_smith.yml
+2024-03-15 14:30:22 - simulate - INFO - Scenario file: scenarios/referralCrisis_seniorBackendEngineer.yml
+2024-03-15 14:30:22 - simulate - INFO - Random seed: 12345
+2024-03-15 14:30:22 - simulate - INFO - Temperature: 0.7
+2024-03-15 14:30:22 - simulate - INFO - Controller enabled: True
+```
+
+#### **DEBUG Level Logging**
+
+```bash
+2024-03-15 14:30:22 - simulate - DEBUG - Full configuration: {'environment': 'development', ...}
+2024-03-15 14:30:22 - simulate - DEBUG - Persona keys: ['name', 'description', 'behavior_dials']
+2024-03-15 14:30:22 - simulate - DEBUG - Scenario keys: ['title', 'description', 'constraints']
+```
+
+#### **WARNING Level Logging**
+
+```bash
+2024-03-15 14:30:22 - simulate - WARNING - Simulation completed with 2 failures
+```
+
+#### **ERROR Level Logging**
+
+```bash
+2024-03-15 14:30:22 - simulate - ERROR - Simulation failed: API connection timeout
+```
+
+### Exit Codes
+
+The CLI provides consistent exit codes for automation:
+
+| Exit Code | Meaning            | Usage                                        |
+| --------- | ------------------ | -------------------------------------------- |
+| `0`       | Success            | Normal completion                            |
+| `1`       | General Error      | Validation failures, file issues, API errors |
+| `130`     | Keyboard Interrupt | User pressed Ctrl+C (SIGINT)                 |
+
+### CI/CD Integration
+
+The validation system is designed for CI/CD environments:
+
+```bash
+# CI-friendly error detection
+if ! python simulate.py --persona test.yml --scenario test.yml; then
+    echo "Simulation failed with exit code $?"
+    exit 1
+fi
+
+# Structured logging for parsing
+python simulate.py --persona test.yml --scenario test.yml 2>&1 | grep "ERROR\|❌"
+```
+
+### Validation Configuration
+
+Validation behavior can be controlled through environment variables:
+
+```bash
+# Log level control
+LOG_LEVEL=DEBUG  # INFO, DEBUG, WARNING, ERROR
+
+# Validation strictness
+VALIDATE_FILES=true  # Enable/disable file validation
+VALIDATE_YAML=true   # Enable/disable YAML validation
+VALIDATE_PARAMS=true # Enable/disable parameter validation
 ```
 
 ## 🔬 Enhanced Sampling Parameter Logging
