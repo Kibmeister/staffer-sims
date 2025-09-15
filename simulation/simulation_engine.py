@@ -144,10 +144,13 @@ class SimulationEngine:
             lines.append(f"**Proxy Model:** {proxy_model} - {proxy_timestamp}")
         lines.append("")
         
-        # Add conversation turns without model/timestamp info
+        # Add conversation turns with controller block if present
         for turn in turns:
             role = turn['role'].title()
             content = turn['content']
+            controller = turn.get('turn_controller')
+            if controller:
+                lines.append(f"<details><summary>Controller</summary>\n\n{controller}\n</details>")
             lines.append(f"**{role}**: {content}")
         
         return "\n\n".join(lines)
@@ -207,7 +210,8 @@ class SimulationEngine:
             fields_captured: Dict[str, bool] = {k: False for k in self.analyzer.mandatory_fields.keys()}
             last_tangent_turn: int = -10
             tangent_cooldown_turns: int = 3  # allow at most one tangent every 3–4 turns
-            
+            use_controller = scenario.get('use_controller', True)
+            controller_text = None  # Ensure controller_text is always defined
             for turn_idx in range(max_turns):
                 logger.debug(f"Starting turn {turn_idx + 1}")
                 
@@ -216,10 +220,11 @@ class SimulationEngine:
                                                 temperature=scenario.get('temperature_override'),
                                                 top_p=scenario.get('top_p_override'))
                 turns.append({
-                    "role": "system", 
+                    "role": "system",
                     "content": sut_reply,
                     "model": sut_model,
-                    "timestamp": sut_timestamp
+                    "timestamp": sut_timestamp,
+                    "turn_controller": controller_text if use_controller else None
                 })
                 messages.append({"role": "assistant", "content": sut_reply})
                 
@@ -231,31 +236,42 @@ class SimulationEngine:
                 # Update fields captured based on SUT reply (simple heuristic on field labels)
                 fields_captured = self._update_fields_captured(fields_captured, sut_reply)
 
-                # Build per-turn controller
-                controller_text, tangent_decision = self._build_turn_controller(
-                    turn_idx,
-                    sut_reply,
-                    fields_captured,
-                    last_tangent_turn,
-                    tangent_cooldown_turns,
-                    scenario.get("interaction_contract", ""),
-                    scenario.get("rng_seed")
-                )
-                # Attach to scenario for this turn
+                # Build per-turn controller if enabled
+                if use_controller:
+                    controller_text, tangent_decision, clarifying_allowed = self._build_turn_controller(
+                        turn_idx,
+                        sut_reply,
+                        fields_captured,
+                        last_tangent_turn,
+                        tangent_cooldown_turns,
+                        scenario.get("interaction_contract", ""),
+                        scenario.get("rng_seed")
+                    )
+                else:
+                    controller_text, tangent_decision, clarifying_allowed = None, False, "no"
                 scenario_turn = dict(scenario)
-                scenario_turn["turn_controller"] = controller_text
+                scenario_turn["turn_controller"] = controller_text if use_controller else None
 
                 # Proxy turn: Generate proxy response
-                proxy_reply, proxy_model, proxy_timestamp = self._handle_proxy_turn(turn_idx, messages, sut_reply,
-                                                    persona, scenario_turn, persona_system_prompt)
+                proxy_reply, proxy_model, proxy_timestamp = self._handle_proxy_turn(
+                    turn_idx, messages, sut_reply, persona, scenario_turn, persona_system_prompt, clarifying_allowed
+                )
                 turns.append({
-                    "role": "user", 
+                    "role": "user",
                     "content": proxy_reply,
                     "model": proxy_model,
-                    "timestamp": proxy_timestamp
+                    "timestamp": proxy_timestamp,
+                    "turn_controller": controller_text if use_controller else None
                 })
                 messages.append({"role": "user", "content": proxy_reply})
                 
+                # After generating the proxy reply, check for clarifying questions and tangents
+                if self.analyzer.check_clarifying_question(proxy_reply):
+                    logger.info(f"Clarifying question detected in turn {turn_idx + 1}")
+
+                if self.analyzer.check_tangent_inclusion(proxy_reply):
+                    logger.info(f"Tangent detected in turn {turn_idx + 1}")
+
                 # Check for conversation completion
                 if sut_provided_summary and self.analyzer.check_proxy_confirmation(proxy_reply):
                     logger.info(f"Conversation completed successfully at turn {turn_idx + 1}")
@@ -370,7 +386,7 @@ class SimulationEngine:
     
     def _handle_proxy_turn(self, turn_idx: int, messages: List[Dict[str, str]], 
                           sut_reply: str, persona: Dict[str, Any], 
-                          scenario: Dict[str, Any], system_prompt: str) -> tuple[str, str, str]:
+                          scenario: Dict[str, Any], system_prompt: str, clarifying_allowed: str) -> tuple[str, str, str]:
         """Handle a single proxy turn
         
         Returns:
@@ -397,6 +413,16 @@ class SimulationEngine:
             # Get model information from proxy client config
             model_name = self.proxy_client.config.model or "unknown-model"
             
+            # Enforce clarifying/tangent only if controller is enabled
+            if scenario.get('use_controller', True):
+                # Enforce clarifying question if allowed and uncertainty is detected
+                if clarifying_allowed == "yes" and self._detect_uncertainty(sut_reply):
+                    proxy_reply += " Can you clarify that?"
+                # Enforce tangent if allowed
+                tangent_allowed = scenario.get("turn_controller", "").find("tangent_allowed: yes") != -1
+                if tangent_allowed:
+                    proxy_reply += " By the way, did you know... Anyway, "
+                    proxy_reply += "What were we discussing?"
             proxy_span.update(output={"text": proxy_reply})
             return proxy_reply, model_name, timestamp
 
@@ -642,7 +668,7 @@ Do not add any second question in the same message.
         tangent_cooldown_turns: int,
         contract: str,
         seed: int,
-    ) -> tuple[str, bool]:
+    ) -> tuple[str, bool, str]:
         """Create a compact controller block for this turn using scenario dials embedded in contract text.
 
         Returns (controller_text, tangent_decision_bool)
@@ -695,11 +721,13 @@ Do not add any second question in the same message.
         tangent_decision = tangent_gate and (tangent_roll < tangent_prob)
         tangent_allowed = "yes" if tangent_decision else "no"
 
+        # Update controller wording to reflect binding decisions in deterministic mode
         lines = [
             "TURN CONTROLLER:",
             f"- clarifying_allowed: {clarifying_allowed} (roll: {clar_roll:.2f} < {clar_prob:.2f} if uncertainty phrase)",
             f"- tangent_allowed: {tangent_allowed} (roll: {tangent_roll:.2f} < {tangent_prob:.2f}; cooldown: {cooldown_remaining}; field_just_captured: {str(field_just_captured).lower()})",
             "- on_summary: confirm succinctly with approved closure phrasing",
             "- resume_policy: after any tangent, answer the recruiter's last question directly",
+            "- deterministic_mode: binding decisions enforced"
         ]
-        return "\n".join(lines), tangent_decision
+        return "\n".join(lines), tangent_decision, clarifying_allowed

@@ -45,7 +45,10 @@ def simulate(args):
     
     # Load persona and scenario configurations
     persona = load_yaml(args.persona)
+    # Pass controller toggle into scenario
     scenario = load_yaml(args.scenario)
+    scenario = dict(scenario)
+    scenario['use_controller'] = args.use_controller
     
     # Initialize simulation engine
     engine = SimulationEngine(settings, sut_prompt_path=args.sut_prompt)
@@ -89,5 +92,6 @@ if __name__ == "__main__":
     parser.add_argument("--temperature", type=float, help="Sampling temperature (e.g., 0.0..1.2)")
     parser.add_argument("--top_p", type=float, help="Nucleus sampling top_p (0..1)")
     parser.add_argument("--sut-prompt", default="prompts/recruiter_v1.txt", help="Path to SUT system prompt file (default: prompts/recruiter_v1.txt)")
+    parser.add_argument("--use-controller", type=lambda x: (str(x).lower() == 'true'), default=True, help="Enable or disable the controller logic (default: True)")
     args = parser.parse_args()
     simulate(args)

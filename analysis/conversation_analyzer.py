@@ -520,3 +520,27 @@ class ConversationAnalyzer:
             True if confirmation was provided
         """
         return any(phrase in proxy_reply.lower() for phrase in self.confirmation_phrases)
+    
+    def check_clarifying_question(self, proxy_reply: str) -> bool:
+        """
+        Check if a clarifying question was asked by the proxy
+        
+        Args:
+            proxy_reply: Proxy response text
+        
+        Returns:
+            True if a clarifying question was asked
+        """
+        return "can you clarify" in proxy_reply.lower()
+
+    def check_tangent_inclusion(self, proxy_reply: str) -> bool:
+        """
+        Check if a tangent was included in the proxy's response
+        
+        Args:
+            proxy_reply: Proxy response text
+        
+        Returns:
+            True if a tangent was included
+        """
+        return "by the way" in proxy_reply.lower() or "anyway" in proxy_reply.lower()
