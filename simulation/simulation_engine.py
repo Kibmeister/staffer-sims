@@ -229,7 +229,7 @@ class SimulationEngine:
         return "\n\n".join(lines)
     
     def run_simulation(self, persona: Dict[str, Any], scenario: Dict[str, Any], 
-                      output_dir: str = None) -> Dict[str, Any]:
+                      output_dir: str = None, save_transcript: bool = False) -> Dict[str, Any]:
         """
         Run a complete persona simulation
         
@@ -426,8 +426,9 @@ class SimulationEngine:
             transcript_md = self._to_markdown(run_id, persona, scenario, turns, final_elapsed_time, timeout_reached, timeout_seconds, final_outcome)
             
             # Now write the markdown file with complete analysis
-            with open(md_path, "w") as f:
-                f.write(transcript_md)
+            if save_transcript:
+                with open(md_path, "w") as f:
+                    f.write(transcript_md)
             
             self.langfuse_service.update_trace_output(
                 conversation_summary.__dict__, final_outcome.__dict__, 

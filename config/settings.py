@@ -44,7 +44,7 @@ class Settings:
     top_p: float = 1.0
     
     # File Paths
-    output_dir: str = "output"
+    output_dir: str = "runouts"
     config_dir: str = "config"
     
     # Logging
@@ -129,7 +129,7 @@ class Settings:
             top_p=float(os.getenv("TOP_P", "1.0")),
             
             # File Paths
-            output_dir=os.getenv("OUTPUT_DIR", "output"),
+            output_dir=os.getenv("OUTPUT_DIR", "runouts"),
             config_dir=os.getenv("CONFIG_DIR", "config"),
             
             # Logging

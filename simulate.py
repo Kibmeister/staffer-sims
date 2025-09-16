@@ -334,6 +334,15 @@ def simulate(args):
         
         # Initialize simulation engine with context manager for proper cleanup
         with SimulationEngine(settings, sut_prompt_path=args.sut_prompt) as engine:
+            # After initializing engine and before running simulation, check args.save_transcript
+            # Pass this flag down to engine.run_simulation or wherever transcript saving occurs
+            if args.save_transcript:
+                scenario['save_transcript'] = True
+                logger.info("Saving full transcript files locally.")
+            else:
+                scenario['save_transcript'] = False
+                logger.info("Not saving full transcript files locally.")
+
             # Run simulation
             output_dir = getattr(args, 'output', None) or settings.output_dir
             
@@ -380,8 +389,8 @@ def simulate(args):
                 print(f"⚠️  Failures Detected: {total_failures} total")
                 logger.warning(f"Simulation completed with {total_failures} failures")
                 for failure in failures[:3]:  # Show first 3 failures
-                    turn_info = f" (turn {failure['turn_occurred']})" if failure.get('turn_occurred') else ""
-                    print(f"   • {failure['category']}: {failure['reason']}{turn_info}")
+                    turn_info = f" (turn {get_failure_attr(failure, 'turn_occurred', None)})" if get_failure_attr(failure, 'turn_occurred', None) else ""
+                    print(f"   • {get_failure_attr(failure, 'category', 'N/A')}: {get_failure_attr(failure, 'reason', 'N/A')}{turn_info}")
                 if len(failures) > 3:
                     print(f"   • ... and {len(failures) - 3} more failures")
             
@@ -399,6 +408,9 @@ def simulate(args):
             
             print("Evaluations: Sent to Langfuse for processing")
             logger.info("Simulation completed successfully")
+
+            # Always write a runout summary file to runouts/
+            write_runout_summary(results, logger)
             
     except KeyboardInterrupt:
         print("\n❌ Simulation interrupted by user", file=sys.stderr)
@@ -408,6 +420,58 @@ def simulate(args):
         print(f"❌ Simulation failed: {e}", file=sys.stderr)
         logger.error(f"Simulation failed: {e}", exc_info=True)
         sys.exit(1)
+
+def get_failure_attr(failure, attr, default=None):
+    if isinstance(failure, dict):
+        return failure.get(attr, default)
+    return getattr(failure, attr, default)
+
+def write_runout_summary(results: Dict[str, Any], logger: logging.Logger) -> str:
+    try:
+        runouts_dir = os.getenv("RUNOUTS_DIR", "runouts")
+        Path(runouts_dir).mkdir(parents=True, exist_ok=True)
+
+        lines = []
+        tp = results.get('transcript_path')
+        jp = results.get('jsonl_path')
+        if tp:
+            lines.append(f"Saved: {tp}")
+        if jp:
+            lines.append(f"Saved: {jp}")
+
+        fo = results.get('final_outcome', {}) or {}
+        status = fo.get('status', 'unknown')
+        level = fo.get('completion_level', 0)
+        timeout_info = " - TIMEOUT REACHED" if results.get('timeout_reached', False) else ""
+        lines.append(f"Conversation Outcome: {status} (Level: {level}%)")
+        lines.append(f"Conversation Duration: {results.get('elapsed_time', 0):.1f}s / {results.get('timeout_limit', 120)}s{timeout_info}")
+
+        failures = fo.get('failures', []) or []
+        total_failures = fo.get('total_failures', 0) or len(failures)
+        if total_failures > 0:
+            lines.append(f"⚠️  Failures Detected: {total_failures} total")
+
+        sampling = results.get('sampling_parameters', {}) or {}
+        lines.append(f"Sampling Parameters: Seed={sampling.get('random_seed', 'auto')}, Temp={sampling.get('temperature', 'default')}, Top-P={sampling.get('top_p', 'default')}")
+
+        info = results.get('information_gathered', {}) or {}
+        skills = info.get('skills_mentioned', []) or []
+        lines.append(f"Information Gathered: {len(skills)} skills, Role: {info.get('role_type')}, Location: {info.get('location')}")
+
+        usage = results.get('usage_stats', {}) or {}
+        lines.append(f"API Usage: {usage.get('total_tokens', 0)} tokens ({usage.get('sut_calls', 0)} SUT + {usage.get('proxy_calls', 0)} Proxy calls)")
+        lines.append(f"Estimated Cost: ${usage.get('estimated_cost', 0):.6f}")
+
+        lines.append("Evaluations: Sent to Langfuse for processing")
+
+        content = "\n".join(lines) + "\n"
+        target_path = Path(runouts_dir) / f"{results.get('run_id','run')}.out"
+        atomic_file_write(content, str(target_path), logger)
+        logger.info(f"Run summary saved: {target_path}")
+        return str(target_path)
+    except Exception as e:
+        logger.error(f"Failed to write run summary: {e}")
+        return ""
 
 
 if __name__ == "__main__":
@@ -434,8 +498,8 @@ Examples:
                        help="Path to scenario YAML file (must exist and be valid YAML)")
     
     # Optional arguments with validation
-    parser.add_argument("--output", default="output", 
-                       help="Output directory for transcripts (default: output)")
+    parser.add_argument("--output", default="runouts", 
+                       help="Output directory for transcripts (default: runouts)")
     parser.add_argument("--seed", type=int, 
                        help="Deterministic RNG seed for reproducible runs (must be positive integer)")
     parser.add_argument("--temperature", type=float, 
@@ -454,6 +518,7 @@ Examples:
                        help="Base delay in seconds for exponential backoff (default: 1.0)")
     parser.add_argument("--skip-duplicates", action="store_true", default=True,
                        help="Skip simulation if identical transcript already exists (default: True)")
+    parser.add_argument('--save-transcript', action='store_true', default=False, help='Save full transcript files (Markdown/JSONL) locally (default: False)')
     
     try:
         args = parser.parse_args()

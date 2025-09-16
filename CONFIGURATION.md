@@ -308,8 +308,8 @@ JSONL files include structured metadata as the first line:
 Console output shows sampling parameters in the simulation summary:
 
 ```bash
-Saved: output/20240315_143022__alex-smith__senior-backend-engineer__seed_12345.md
-Saved: output/20240315_143022__alex-smith__senior-backend-engineer__seed_12345.jsonl
+Saved: runouts/20240315_143022__alex-smith__senior-backend-engineer__seed_12345.md
+Saved: runouts/20240315_143022__alex-smith__senior-backend-engineer__seed_12345.jsonl
 Conversation Outcome: completed_successfully (Level: 100%)
 Conversation Duration: 45.2s / 120s
 Sampling Parameters: Seed=12345, Temp=0.7, Top-P=1.0
@@ -338,7 +338,7 @@ hesitation:0.10
 Output files include seed values for easy identification and reproducibility:
 
 ```
-output/
+runouts/
 ├── 20240315_143022__alex-smith__senior-backend-engineer__seed_12345.md
 ├── 20240315_143022__alex-smith__senior-backend-engineer__seed_12345.jsonl
 ├── 20240315_143023__sara-mitchell__ai-scepticism__seed_67890.md

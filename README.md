@@ -39,7 +39,7 @@ staffer-sims/
 │   └── referralCrisis_seniorBackendEngineer.yml # Example job scenario with contract fields
 ├── prompts/               # System prompts and templates
 │   └── recruiter_v1.txt           # Recruiter assistant system prompt
-└── output/                # Simulation results and transcripts
+└── runouts/                # Simulation results and transcripts
 ```
 
 ## 🚀 Quick Start
@@ -113,7 +113,7 @@ The `simulate.py` script supports comprehensive command-line arguments with robu
 
 | Argument           | Type    | Default                    | Validation            | Description                                   | Example                                   |
 | ------------------ | ------- | -------------------------- | --------------------- | --------------------------------------------- | ----------------------------------------- |
-| `--output`         | string  | `output`                   | Directory creation    | Output directory for transcripts              | `--output my_results`                     |
+| `--output`         | string  | `runouts`                  | Directory creation    | Output directory for transcripts              | `--output my_results`                     |
 | `--seed`           | integer | auto-generated             | Positive integer      | Deterministic RNG seed for per-turn decisions | `--seed 12345678`                         |
 | `--temperature`    | float   | `0.7`                      | 0.0-2.0 range         | Sampling temperature for response creativity  | `--temperature 0.0`                       |
 | `--top_p`          | float   | `1.0`                      | 0.0-1.0 range         | Nucleus sampling top_p parameter              | `--top_p 0.9`                             |
@@ -463,8 +463,8 @@ Staffer Sims provides comprehensive logging and observability of all sampling pa
 #### **Enhanced Console Output**
 
 ```bash
-Saved: output/20240315_143022__alex-smith__senior-backend-engineer__seed_12345.md
-Saved: output/20240315_143022__alex-smith__senior-backend-engineer__seed_12345.jsonl
+Saved: runouts/20240315_143022__alex-smith__senior-backend-engineer__seed_12345.md
+Saved: runouts/20240315_143022__alex-smith__senior-backend-engineer__seed_12345.jsonl
 Conversation Outcome: completed_successfully (Level: 100%)
 Conversation Duration: 45.2s / 120s
 Sampling Parameters: Seed=12345, Temp=0.7, Top-P=1.0
@@ -491,7 +491,7 @@ hesitation:0.10
 Output files now include seed values for easy identification and reproducibility:
 
 ```
-output/
+runouts/
 ├── 20240315_143022__alex-smith__senior-backend-engineer__seed_12345.md
 ├── 20240315_143022__alex-smith__senior-backend-engineer__seed_12345.jsonl
 ├── 20240315_143023__sara-mitchell__ai-scepticism__seed_67890.md
