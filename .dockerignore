@@ -1,0 +1,29 @@
+# VCS
+.git
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Envs & secrets
+.env
+.env.*
+.venv/
+venv/
+
+# Editors/IDE
+.vscode/
+.idea/
+
+# Outputs & builds
+output/
+dist/
+build/
+*.log
+
+# Misc
+*.ipynb
+*.csv
+node_modules/

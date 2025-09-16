@@ -9,8 +9,11 @@ import argparse
 import logging
 import sys
 import os
+import time
+import tempfile
+import shutil
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 from dotenv import load_dotenv
 
 # Load .env file first
@@ -104,6 +107,158 @@ def setup_structured_logging(settings) -> logging.Logger:
     
     return logger
 
+### ---------- Retry and Backoff Functions ----------
+def is_transient_error(exception: Exception) -> bool:
+    """Determine if an exception represents a transient error that should be retried"""
+    error_str = str(exception).lower()
+    
+    # Check for HTTP status codes that indicate transient errors
+    transient_indicators = [
+        '429',  # Too Many Requests
+        '500',  # Internal Server Error
+        '502',  # Bad Gateway
+        '503',  # Service Unavailable
+        '504',  # Gateway Timeout
+        'timeout',
+        'connection error',
+        'connection refused',
+        'connection reset',
+        'network error',
+        'temporary failure',
+        'service unavailable',
+        'rate limit',
+        'throttled'
+    ]
+    
+    return any(indicator in error_str for indicator in transient_indicators)
+
+def exponential_backoff_delay(attempt: int, base_delay: float = 1.0, max_delay: float = 60.0) -> float:
+    """Calculate exponential backoff delay with jitter"""
+    import random
+    
+    # Exponential backoff: base_delay * (2^attempt)
+    delay = base_delay * (2 ** attempt)
+    
+    # Cap at max_delay
+    delay = min(delay, max_delay)
+    
+    # Add jitter (±25% random variation)
+    jitter = delay * 0.25 * (2 * random.random() - 1)
+    delay += jitter
+    
+    return max(0, delay)
+
+def check_duplicate_transcript(run_id: str, output_dir: str) -> Optional[Tuple[str, str]]:
+    """Check if a transcript with the same run_id already exists"""
+    output_path = Path(output_dir)
+    if not output_path.exists():
+        return None
+    
+    # Look for existing files with the same run_id
+    for file_path in output_path.glob(f"{run_id}__*"):
+        if file_path.suffix in ['.md', '.jsonl']:
+            # Found existing transcript, return the paths
+            md_path = str(file_path.with_suffix('.md'))
+            jsonl_path = str(file_path.with_suffix('.jsonl'))
+            return md_path, jsonl_path
+    
+    return None
+
+def atomic_file_write(content: str, target_path: str, logger: logging.Logger) -> None:
+    """Write content to a file atomically using temp file and rename"""
+    target_path = Path(target_path)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Create temp file in the same directory
+    temp_fd, temp_path = tempfile.mkstemp(
+        suffix=target_path.suffix,
+        prefix=f".{target_path.stem}_",
+        dir=target_path.parent
+    )
+    
+    try:
+        # Write content to temp file
+        with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
+            f.write(content)
+        
+        # Atomic rename
+        shutil.move(temp_path, target_path)
+        logger.debug(f"Atomically wrote file: {target_path}")
+        
+    except Exception as e:
+        # Clean up temp file on error
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+        raise e
+
+def run_simulation_with_retry(engine, persona: Dict[str, Any], scenario: Dict[str, Any], 
+                            output_dir: str, logger: logging.Logger, 
+                            max_retries: int = 3, base_delay: float = 1.0, 
+                            skip_duplicates: bool = True) -> Dict[str, Any]:
+    """Run simulation with exponential backoff retry for transient errors"""
+    
+    # Generate run_id for duplicate detection
+    run_id = scenario.get('run_id', f"sim_{int(time.time())}")
+    
+    # Check for duplicate transcript if enabled
+    if skip_duplicates:
+        existing_files = check_duplicate_transcript(run_id, output_dir)
+        if existing_files:
+            logger.info(f"Found existing transcript for run_id {run_id}, skipping simulation")
+            md_path, jsonl_path = existing_files
+            
+            # Return mock results for existing transcript
+            return {
+                'transcript_path': md_path,
+                'jsonl_path': jsonl_path,
+                'run_id': run_id,
+                'final_outcome': {'status': 'completed_successfully', 'completion_level': 100},
+                'timeout_reached': False,
+                'elapsed_time': 0,
+                'timeout_limit': 120,
+                'information_gathered': {'skills_mentioned': [], 'role_type': None, 'location': None},
+                'usage_stats': {'total_tokens': 0, 'sut_calls': 0, 'proxy_calls': 0, 'estimated_cost': 0},
+                'sampling_parameters': {'random_seed': 'existing', 'temperature': 'existing', 'top_p': 'existing'}
+            }
+    
+    last_exception = None
+    
+    for attempt in range(max_retries + 1):
+        try:
+            if attempt > 0:
+                delay = exponential_backoff_delay(attempt - 1, base_delay)
+                logger.info(f"Retrying simulation (attempt {attempt + 1}/{max_retries + 1}) after {delay:.1f}s delay")
+                time.sleep(delay)
+            
+            logger.info(f"Starting simulation execution (attempt {attempt + 1}/{max_retries + 1})")
+            results = engine.run_simulation(persona, scenario, output_dir)
+            
+            # Verify results are complete
+            if not results or 'transcript_path' not in results:
+                raise Exception("Simulation returned incomplete results")
+            
+            logger.info("Simulation completed successfully")
+            return results
+            
+        except Exception as e:
+            last_exception = e
+            
+            if attempt < max_retries and is_transient_error(e):
+                logger.warning(f"Transient error on attempt {attempt + 1}: {e}")
+                continue
+            else:
+                # Permanent error or max retries reached
+                if attempt >= max_retries:
+                    logger.error(f"Max retries ({max_retries}) exceeded. Last error: {e}")
+                else:
+                    logger.error(f"Permanent error detected: {e}")
+                raise e
+    
+    # This should never be reached, but just in case
+    raise last_exception or Exception("Unknown error in retry loop")
+
 ### ---------- Main Simulation Function ----------
 def simulate(args):
     """Run a persona simulation with the given arguments"""
@@ -163,6 +318,12 @@ def simulate(args):
         if hasattr(args, 'timeout') and args.timeout is not None:
             validate_positive_integer(args.timeout, "Timeout")
         
+        if hasattr(args, 'max_retries') and args.max_retries is not None:
+            validate_positive_integer(args.max_retries, "Max retries")
+        
+        if hasattr(args, 'retry_delay') and args.retry_delay is not None:
+            validate_numeric_range(args.retry_delay, "Retry delay", 0.1, 60.0)
+        
         # Log payload summaries at DEBUG level (keys only for security)
         logger.debug(f"Persona keys: {list(persona.keys())}")
         logger.debug(f"Scenario keys: {list(scenario.keys())}")
@@ -195,9 +356,11 @@ def simulate(args):
                 scenario = dict(scenario)
                 scenario['conversation_timeout'] = int(args.timeout)
 
-            logger.info("Starting simulation execution")
-            results = engine.run_simulation(persona, scenario, output_dir)
-            logger.info("Simulation completed successfully")
+            # Run simulation with retry logic
+            max_retries = getattr(args, 'max_retries', 3)
+            retry_delay = getattr(args, 'retry_delay', 1.0)
+            skip_duplicates = getattr(args, 'skip_duplicates', True)
+            results = run_simulation_with_retry(engine, persona, scenario, output_dir, logger, max_retries, retry_delay, skip_duplicates)
             
             # Log output paths
             logger.info(f"Transcript saved: {results['transcript_path']}")
@@ -285,6 +448,12 @@ Examples:
                        help="Enable or disable the controller logic (true/false, default: true)")
     parser.add_argument("--timeout", type=int, default=120, 
                        help="Maximum conversation duration in seconds (must be positive, default: 120)")
+    parser.add_argument("--max-retries", type=int, default=3, 
+                       help="Maximum number of retry attempts for transient errors (default: 3)")
+    parser.add_argument("--retry-delay", type=float, default=1.0, 
+                       help="Base delay in seconds for exponential backoff (default: 1.0)")
+    parser.add_argument("--skip-duplicates", action="store_true", default=True,
+                       help="Skip simulation if identical transcript already exists (default: True)")
     
     try:
         args = parser.parse_args()

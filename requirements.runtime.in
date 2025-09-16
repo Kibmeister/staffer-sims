@@ -1,0 +1,5 @@
+# Minimal runtime dependencies for simulate.py
+PyYAML
+python-dotenv
+requests
+langfuse

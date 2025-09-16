@@ -822,6 +822,42 @@ Notes:
 
 ### Core Dependencies
 
+## 🐳 Docker (B-01 — Containerize the simulator CLI)
+
+A minimal, non-root image is provided to run the simulator reproducibly.
+
+### Build
+
+```bash
+docker build -t staffer-sims/simulate:dev .
+```
+
+### Usage
+
+```bash
+# Show CLI flags
+docker run --rm staffer-sims/simulate:dev --help
+
+# Example run (adjust paths and env as needed)
+docker run --rm \
+  -e LANGFUSE_PUBLIC_KEY=$LANGFUSE_PUBLIC_KEY \
+  -e LANGFUSE_SECRET_KEY=$LANGFUSE_SECRET_KEY \
+  -e LANGFUSE_HOST=$LANGFUSE_HOST \
+  staffer-sims/simulate:dev \
+  --persona personas/alex_smith.yml \
+  --scenario scenarios/referralCrisis_seniorBackendEngineer.yml \
+  --temperature 0.0 --top_p 1.0 --timeout 90
+```
+
+### Image properties
+
+- Non-root user (UID 10001)
+- `PYTHONUNBUFFERED=1` for real-time logs
+- Install-time dependency locking via `pip-compile --generate-hashes`
+- No secrets in layers (verify with `docker history --no-trunc`)
+
+Note: target image size goal < 400MB. The slim base and hashed runtime deps keep footprint small.
+
 - **`langfuse`**: Observability and tracing platform
 - **`pyyaml`**: YAML configuration file parsing
 - **`python-dotenv`**: Environment variable management
