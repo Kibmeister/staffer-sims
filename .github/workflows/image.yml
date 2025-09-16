@@ -39,23 +39,30 @@ jobs:
             type=sha
             type=ref,event=tag
 
-      - name: Build and push (multi-arch)
+      - name: Build image for local scan
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ github.event_name != 'pull_request' }}
+          load: true
+          tags: simulate:local
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: simulate:local
+          format: 'table'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          exit-code: '1'
+
+      - name: Build and push (multi-arch)
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Scan image with Trivy
-        if: github.event_name != 'pull_request'
-        uses: aquasecurity/trivy-action@0.24.0
-        with:
-          image-ref: ghcr.io/${{ github.repository_owner }}/simulate:latest
-          format: 'table'
-          ignore-unfixed: true
-          vuln-type: 'os,library'
-          exit-code: '1'
