@@ -31,6 +31,7 @@ WORKDIR /app
 # Install only hashed, minimal runtime deps
 COPY --from=lock /lock/requirements.runtime.txt /app/requirements.runtime.txt
 RUN pip install --upgrade pip && \
+    pip install --no-cache-dir --upgrade setuptools==78.1.1 && \
     pip install --no-cache-dir --require-hashes -r /app/requirements.runtime.txt
 
 # Copy source with proper ownership (avoid root-owned files)
