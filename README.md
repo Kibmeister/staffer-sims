@@ -923,11 +923,13 @@ Security scanning: Trivy runs on the published `:latest` image and fails the job
 
 ```bash
 # Replace <org> with your GitHub org/username
-docker buildx imagetools inspect ghcr.io/<org>/simulate:latest
+docker buildx imagetools inspect ghcr.io/staffer-ai/simulate:latest
 
-docker pull ghcr.io/<org>/simulate:latest
-docker run --rm ghcr.io/<org>/simulate:latest --help | head -20
+docker pull ghcr.io/staffer-ai/simulate:latest
+docker run --rm ghcr.io/staffer-ai/simulate:latest --help | head -20
 ```
+
+This is a really big change "staffy staffer"
 
 Ensure Actions are enabled in repo settings. The workflow uses `GITHUB_TOKEN` to push to GHCR.
 
