@@ -1,0 +1,5 @@
+# Ignore patterns (CVE IDs or package:version ranges)
+# Example:
+# CVE-2021-1234
+# alpine:3.19 busybox:1.36.1-r29
+

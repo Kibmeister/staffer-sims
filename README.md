@@ -839,6 +839,7 @@ python simulate.py \
 ```
 
 **Features:**
+
 - Stable run IDs (no timestamp variation)
 - Normalized timestamps and elapsed time
 - Identical `.md` and `.jsonl` outputs across runs
@@ -864,7 +865,7 @@ Every run emits a structured summary line for automation:
 # Success example
 RUN_SUMMARY_JSON:{"batch_id":"single","build_version":"abc123","deterministic_mode":true,"item_id":"single","persona":"Alex Smith","persona_version":"unknown","p50_turn_latency_ms":null,"proxy_model":"gpt-4o-mini","scenario":"Senior Backend Engineer","scenario_version":"unknown","seed":12345,"status":"success","sut_model":"gpt-4o-mini","sut_prompt_name":"prompts/recruiter_v1.txt","sut_prompt_version":"unknown","temperature":0.0,"top_p":1.0,"total_runtime_ms":45230,"trace_id":null,"turns":8}
 
-# Failure example  
+# Failure example
 RUN_SUMMARY_JSON:{"batch_id":"single","build_version":"abc123","deterministic_mode":false,"error":"Missing required environment variables: langfuse_host (from LANGFUSE_HOST)","item_id":"single","persona":null,"persona_version":"unknown","p50_turn_latency_ms":null,"proxy_model":null,"scenario":null,"scenario_version":"unknown","seed":null,"status":"failed","sut_model":null,"sut_prompt_name":null,"sut_prompt_version":"unknown","temperature":null,"top_p":null,"total_runtime_ms":null,"trace_id":null,"turns":null}
 ```
 
@@ -903,6 +904,32 @@ docker run --rm \
 - No secrets in layers (verify with `docker history --no-trunc`)
 
 Note: target image size goal < 400MB. The slim base and hashed runtime deps keep footprint small.
+
+## 🔄 CI: Build, Scan, and Publish (GHCR)
+
+This repo includes a GitHub Actions workflow that builds, scans, and publishes a multi-arch image to GHCR on pushes to `main` and semantic tags (`vX.Y.Z`).
+
+Location: `.github/workflows/image.yml`
+
+Tags produced:
+
+- `:latest` (default branch only)
+- `:sha` (commit SHA)
+- `:vX.Y.Z` (when pushing tags)
+
+Security scanning: Trivy runs on the published `:latest` image and fails the job on high vulnerabilities.
+
+### Verify after merge
+
+```bash
+# Replace <org> with your GitHub org/username
+docker buildx imagetools inspect ghcr.io/<org>/simulate:latest
+
+docker pull ghcr.io/<org>/simulate:latest
+docker run --rm ghcr.io/<org>/simulate:latest --help | head -20
+```
+
+Ensure Actions are enabled in repo settings. The workflow uses `GITHUB_TOKEN` to push to GHCR.
 
 - **`langfuse`**: Observability and tracing platform
 - **`pyyaml`**: YAML configuration file parsing
