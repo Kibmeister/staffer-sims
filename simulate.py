@@ -365,6 +365,16 @@ def simulate(args):
                 scenario = dict(scenario)
                 scenario['conversation_timeout'] = int(args.timeout)
 
+            # Enable deterministic mode automatically when sampling is fixed (temp=0.0, top_p=1.0)
+            deterministic_mode = False
+            try:
+                t = scenario.get('temperature_override', settings.temperature)
+                p = scenario.get('top_p_override', settings.top_p)
+                deterministic_mode = (float(t) == 0.0 and float(p) == 1.0 and (getattr(args, 'seed', None) is not None or settings.rng_seed is not None))
+            except Exception:
+                deterministic_mode = False
+            scenario['deterministic_mode'] = deterministic_mode
+
             # Run simulation with retry logic
             max_retries = getattr(args, 'max_retries', 3)
             retry_delay = getattr(args, 'retry_delay', 1.0)
@@ -408,6 +418,38 @@ def simulate(args):
             
             print("Evaluations: Sent to Langfuse for processing")
             logger.info("Simulation completed successfully")
+
+            # Emit one-line RUN_SUMMARY_JSON for external parsers (success)
+            try:
+                import json, time, subprocess
+                build_version = os.getenv("GIT_SHA") or subprocess.getoutput("git rev-parse --short HEAD 2>/dev/null") or "unknown"
+                resolved_temp = scenario.get('temperature_override', settings.temperature)
+                resolved_top_p = scenario.get('top_p_override', settings.top_p)
+                run_summary = {
+                    "batch_id": os.getenv("BATCH_ID", "single"),
+                    "item_id": os.getenv("ITEM_ID", "single"),
+                    "persona": results['persona'],
+                    "persona_version": os.getenv("PERSONA_VERSION", "unknown"),
+                    "scenario": results['scenario'],
+                    "scenario_version": os.getenv("SCENARIO_VERSION", "unknown"),
+                    "sut_prompt_name": args.sut_prompt,
+                    "sut_prompt_version": os.getenv("SUT_PROMPT_VERSION", "unknown"),
+                    "seed": scenario.get('rng_seed'),
+                    "temperature": float(resolved_temp) if resolved_temp is not None else None,
+                    "top_p": float(resolved_top_p) if resolved_top_p is not None else None,
+                    "deterministic_mode": bool(scenario.get('deterministic_mode', False)),
+                    "sut_model": engine.sut_client.config.model if hasattr(engine.sut_client, 'config') else None,
+                    "proxy_model": engine.proxy_client.config.model if hasattr(engine.proxy_client, 'config') else None,
+                    "trace_id": None,
+                    "turns": results['total_turns'],
+                    "status": "success",
+                    "total_runtime_ms": int((results.get('elapsed_time', 0.0)) * 1000),
+                    "p50_turn_latency_ms": None,
+                    "build_version": build_version,
+                }
+                print("RUN_SUMMARY_JSON:" + json.dumps(run_summary, sort_keys=True))
+            except Exception:
+                pass
 
             # Always write a runout summary file to runouts/
             write_runout_summary(results, logger)
@@ -527,5 +569,35 @@ Examples:
         # Re-raise system exit to preserve exit codes
         raise
     except Exception as e:
+        # Emit structured summary for external parsers
+        try:
+            import json, time, os, subprocess
+            build_version = os.getenv("GIT_SHA") or subprocess.getoutput("git rev-parse --short HEAD 2>/dev/null") or "unknown"
+            summary = {
+                "batch_id": os.getenv("BATCH_ID", "single"),
+                "item_id": os.getenv("ITEM_ID", "single"),
+                "persona": getattr(args, 'persona', None),
+                "persona_version": os.getenv("PERSONA_VERSION", "unknown"),
+                "scenario": getattr(args, 'scenario', None),
+                "scenario_version": os.getenv("SCENARIO_VERSION", "unknown"),
+                "sut_prompt_name": getattr(args, 'sut_prompt', None),
+                "sut_prompt_version": os.getenv("SUT_PROMPT_VERSION", "unknown"),
+                "seed": getattr(args, 'seed', None),
+                "temperature": getattr(args, 'temperature', None),
+                "top_p": getattr(args, 'top_p', None),
+                "deterministic_mode": False,
+                "sut_model": None,
+                "proxy_model": None,
+                "trace_id": None,
+                "turns": None,
+                "status": "failed",
+                "total_runtime_ms": None,
+                "p50_turn_latency_ms": None,
+                "build_version": build_version,
+                "error": str(e),
+            }
+            print("RUN_SUMMARY_JSON:" + json.dumps(summary, sort_keys=True))
+        except Exception:
+            pass
         print(f"❌ Unexpected error: {e}", file=sys.stderr)
         sys.exit(1)

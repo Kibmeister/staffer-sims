@@ -1,0 +1,10 @@
+Saved: /app/runouts/test1/13-19_16-09-2025_run-7f38fd__alex-smith__senior-backend-engineer-referral-crisis__seed_42.md
+Saved: /app/runouts/test1/13-19_16-09-2025_run-7f38fd__alex-smith__senior-backend-engineer-referral-crisis__seed_42.jsonl
+Conversation Outcome: ConversationStatus.COMPLETED_SUCCESSFULLY (Level: 100%)
+Conversation Duration: 41.9s / 120s
+⚠️  Failures Detected: 1 total
+Sampling Parameters: Seed=42, Temp=0.0, Top-P=1.0
+Information Gathered: 1 skills, Role: , And The Empty Referral Pipeline Is Killing Me, Location: Onsite
+API Usage: 88778 tokens (17 SUT + 17 Proxy calls)
+Estimated Cost: $0.013722
+Evaluations: Sent to Langfuse for processing

@@ -243,7 +243,8 @@ class SimulationEngine:
         """
         import time
         
-        run_id = self._generate_run_id()
+        deterministic_mode = bool(scenario.get('deterministic_mode', False))
+        run_id = self._generate_run_id(persona, scenario, deterministic_mode, scenario.get('rng_seed'))
         max_turns = scenario.get("max_turns", self.settings.max_turns)
         output_dir = output_dir or self.settings.output_dir
         
@@ -308,9 +309,15 @@ class SimulationEngine:
                 
                 # SUT turn: Generate SUT response
                 try:
-                    sut_reply, sut_model, sut_timestamp = self._handle_sut_turn(turn_idx, messages, persona_system_prompt,
-                                                    temperature=scenario.get('temperature_override'),
-                                                    top_p=scenario.get('top_p_override'))
+                    sut_reply, sut_model, sut_timestamp = self._handle_sut_turn(
+                        turn_idx,
+                        messages,
+                        persona_system_prompt,
+                        temperature=scenario.get('temperature_override'),
+                        top_p=scenario.get('top_p_override'),
+                        deterministic=deterministic_mode,
+                        seed=scenario.get('rng_seed')
+                    )
                 except Exception as e:
                     api_errors.append(f"SUT API error at turn {turn_idx + 1}: {str(e)}")
                     logger.error(f"SUT turn failed at turn {turn_idx + 1}: {e}")
@@ -351,7 +358,15 @@ class SimulationEngine:
                 # Proxy turn: Generate proxy response
                 try:
                     proxy_reply, proxy_model, proxy_timestamp = self._handle_proxy_turn(
-                        turn_idx, messages, sut_reply, persona, scenario_turn, persona_system_prompt, clarifying_allowed
+                        turn_idx,
+                        messages,
+                        sut_reply,
+                        persona,
+                        scenario_turn,
+                        persona_system_prompt,
+                        clarifying_allowed,
+                        deterministic=deterministic_mode,
+                        seed=scenario.get('rng_seed')
                     )
                 except Exception as e:
                     api_errors.append(f"Proxy API error at turn {turn_idx + 1}: {str(e)}")
@@ -387,8 +402,17 @@ class SimulationEngine:
             timeout_reached = final_elapsed_time >= timeout_seconds
             
             # Save transcript
-            md_path, jsonl_path = self._save_transcript(run_id, persona, scenario, turns, output_dir, 
-                                                      final_elapsed_time, timeout_reached, timeout_seconds)
+            elapsed_for_files = 0.0 if deterministic_mode else final_elapsed_time
+            md_path, jsonl_path = self._save_transcript(
+                run_id,
+                persona,
+                scenario,
+                turns,
+                output_dir,
+                elapsed_for_files,
+                timeout_reached,
+                timeout_seconds,
+            )
             
             # Analyze conversation
             conversation_summary = self.analyzer.extract_conversation_summary(turns)
@@ -423,7 +447,16 @@ class SimulationEngine:
                 top_p=str(scenario.get("top_p_override", "default"))
             )
             
-            transcript_md = self._to_markdown(run_id, persona, scenario, turns, final_elapsed_time, timeout_reached, timeout_seconds, final_outcome)
+            transcript_md = self._to_markdown(
+                run_id,
+                persona,
+                scenario,
+                turns,
+                0.0 if deterministic_mode else final_elapsed_time,
+                timeout_reached,
+                timeout_seconds,
+                final_outcome,
+            )
             
             # Now write the markdown file with complete analysis
             if save_transcript:
@@ -456,7 +489,7 @@ class SimulationEngine:
                 "information_gathered": information_gathered.__dict__,
                 "transcript_path": md_path,
                 "jsonl_path": jsonl_path,
-                "elapsed_time": final_elapsed_time,
+                "elapsed_time": 0.0 if deterministic_mode else final_elapsed_time,
                 "timeout_reached": timeout_reached,
                 "timeout_limit": timeout_seconds,
                 "sampling_parameters": {
@@ -555,7 +588,8 @@ class SimulationEngine:
         logger.debug(f"{client_type.upper()} usage: {total_tokens} tokens, ${cost:.6f}, running total: ${self.usage_stats.estimated_cost:.6f}")
     
     def _handle_sut_turn(self, turn_idx: int, messages: List[Dict[str, str]], 
-                        system_prompt: str, temperature: float | None = None, top_p: float | None = None) -> tuple[str, str, str]:
+                        system_prompt: str, temperature: float | None = None, top_p: float | None = None,
+                        deterministic: bool = False, seed: int | None = None) -> tuple[str, str, str]:
         """Handle a single SUT turn
         
         Returns:
@@ -578,9 +612,17 @@ class SimulationEngine:
         
         with self.langfuse_service.start_sut_span(turn_idx, messages_for_sut) as sut_span:
             # Capture timestamp before API call
-            timestamp = datetime.now().strftime("%H:%M:%S %d/%m/%Y")
+            timestamp = "00:00:00 01/01/1970" if deterministic else datetime.now().strftime("%H:%M:%S %d/%m/%Y")
             
-            sut_reply, sut_usage = self.sut_client.send_conversation(messages_for_sut, temperature=temperature, top_p=top_p)
+            # Force sampling params exact pass-through; if deterministic and sampling is 0/1, ensure no hidden randomness
+            if deterministic and (float(temperature or 0.0) == 0.0 and float(top_p or 1.0) == 1.0):
+                # Some providers still inject noise; rely on fixed seed in messages to minimize (if supported)
+                messages_for_sut = messages_for_sut
+            sut_reply, sut_usage = self.sut_client.send_conversation(
+                messages_for_sut,
+                temperature=0.0 if deterministic else temperature,
+                top_p=1.0 if deterministic else top_p,
+            )
             
             # Get model information from SUT client config
             model_name = self.sut_client.config.model or "unknown-model"
@@ -610,7 +652,8 @@ class SimulationEngine:
     
     def _handle_proxy_turn(self, turn_idx: int, messages: List[Dict[str, str]], 
                           sut_reply: str, persona: Dict[str, Any], 
-                          scenario: Dict[str, Any], system_prompt: str, clarifying_allowed: str) -> tuple[str, str, str]:
+                          scenario: Dict[str, Any], system_prompt: str, clarifying_allowed: str,
+                          deterministic: bool = False, seed: int | None = None) -> tuple[str, str, str]:
         """Handle a single proxy turn
         
         Returns:
@@ -628,8 +671,13 @@ class SimulationEngine:
         
         with self.langfuse_service.start_proxy_span(turn_idx, system_prompt, messages_for_proxy) as proxy_span:
             # Capture timestamp before API call
-            timestamp = datetime.now().strftime("%H:%M:%S %d/%m/%Y")
+            timestamp = "00:00:00 01/01/1970" if deterministic else datetime.now().strftime("%H:%M:%S %d/%m/%Y")
             
+            # Enforce deterministic sampling when requested
+            if deterministic:
+                scenario = dict(scenario)
+                scenario['temperature_override'] = 0.0
+                scenario['top_p_override'] = 1.0
             proxy_reply, proxy_usage = self.proxy_client.send_persona_message(
                 persona, scenario, messages_for_proxy
             )
@@ -836,12 +884,21 @@ Do not add any second question in the same message.
         )
         return controller + "\n" + prompt
     
-    def _generate_run_id(self) -> str:
-        """Generate unique run ID"""
+    def _generate_run_id(self, persona: Dict[str, Any], scenario: Dict[str, Any], deterministic: bool, seed: int | None) -> str:
+        """Generate run ID.
+
+        When deterministic is True, derive a stable ID from persona/scenario/seed
+        to guarantee identical filenames across runs with the same inputs.
+        """
+        if deterministic and seed is not None:
+            import hashlib
+            persona_name = str(persona.get("name", "persona")).strip().lower()
+            scenario_title = str(scenario.get("title", "scenario")).strip().lower()
+            key = f"{persona_name}|{scenario_title}|{int(seed)}"
+            digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:6]
+            return f"deterministic_run-{digest}"
+
         import uuid
-        # Use LOCAL time (24h) + day/month/year in a file-system safe format
-        # Desired human format would be "HH:mm dd/MM/yyyy", but ":" and "/" are unsafe in filenames.
-        # We therefore map to "HH-mm_dd-MM-yyyy" while preserving the same information.
         return datetime.now().strftime("%H-%M_%d-%m-%Y") + f"_run-{uuid.uuid4().hex[:6]}"
 
     def _enforce_single_question_all_turns(self, text: str) -> str:

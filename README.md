@@ -822,6 +822,52 @@ Notes:
 
 ### Core Dependencies
 
+## 🎯 Deterministic Mode & Configuration Precedence
+
+### Deterministic Mode
+
+When you provide a seed and set `temperature=0.0` and `top_p=1.0`, the system automatically enables deterministic mode for reproducible outputs:
+
+```bash
+# Deterministic run - produces identical outputs
+python simulate.py \
+  --persona personas/alex_smith.yml \
+  --scenario scenarios/referralCrisis_seniorBackendEngineer.yml \
+  --seed 12345 \
+  --temperature 0.0 \
+  --top_p 1.0
+```
+
+**Features:**
+- Stable run IDs (no timestamp variation)
+- Normalized timestamps and elapsed time
+- Identical `.md` and `.jsonl` outputs across runs
+- Same Langfuse trace content and tags
+
+### Configuration Precedence
+
+Configuration values follow this hierarchy: **CLI > ENV > Default**
+
+```bash
+# Example: CLI overrides ENV
+export TEMPERATURE=0.9
+export TOP_P=0.7
+python simulate.py --temperature 0.2 --top_p 1.0
+# Result: temperature=0.2, top_p=1.0 (CLI wins)
+```
+
+### RUN_SUMMARY_JSON Output
+
+Every run emits a structured summary line for automation:
+
+```bash
+# Success example
+RUN_SUMMARY_JSON:{"batch_id":"single","build_version":"abc123","deterministic_mode":true,"item_id":"single","persona":"Alex Smith","persona_version":"unknown","p50_turn_latency_ms":null,"proxy_model":"gpt-4o-mini","scenario":"Senior Backend Engineer","scenario_version":"unknown","seed":12345,"status":"success","sut_model":"gpt-4o-mini","sut_prompt_name":"prompts/recruiter_v1.txt","sut_prompt_version":"unknown","temperature":0.0,"top_p":1.0,"total_runtime_ms":45230,"trace_id":null,"turns":8}
+
+# Failure example  
+RUN_SUMMARY_JSON:{"batch_id":"single","build_version":"abc123","deterministic_mode":false,"error":"Missing required environment variables: langfuse_host (from LANGFUSE_HOST)","item_id":"single","persona":null,"persona_version":"unknown","p50_turn_latency_ms":null,"proxy_model":null,"scenario":null,"scenario_version":"unknown","seed":null,"status":"failed","sut_model":null,"sut_prompt_name":null,"sut_prompt_version":"unknown","temperature":null,"top_p":null,"total_runtime_ms":null,"trace_id":null,"turns":null}
+```
+
 ## 🐳 Docker (B-01 — Containerize the simulator CLI)
 
 A minimal, non-root image is provided to run the simulator reproducibly.

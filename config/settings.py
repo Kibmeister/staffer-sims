@@ -61,7 +61,8 @@ class Settings:
         # Always required
         required_fields = [
             ("langfuse_public_key", "LANGFUSE_PUBLIC_KEY"),
-            ("langfuse_secret_key", "LANGFUSE_SECRET_KEY")
+            ("langfuse_secret_key", "LANGFUSE_SECRET_KEY"),
+            ("langfuse_host", "LANGFUSE_HOST"),
         ]
         
         # API provider specific requirements

@@ -39,7 +39,7 @@ This guide explains how to set up and manage environment configuration for the S
 | ------------------ | ------- | -------- | -------------------------- | ------------------------------------------------------ | -------------------------------------------- |
 | `--persona`        | string  | ✅       | -                          | File exists, readable, valid YAML with required fields | Path to persona YAML file                    |
 | `--scenario`       | string  | ✅       | -                          | File exists, readable, valid YAML with required fields | Path to scenario YAML file                   |
-| `--output`         | string  | ❌       | `output`                   | Directory creation                                     | Output directory for transcripts             |
+| `--output`         | string  | ❌       | `runouts`                  | Directory creation                                     | Output directory for transcripts             |
 | `--seed`           | integer | ❌       | auto-generated             | Positive integer                                       | Deterministic RNG seed for reproducible runs |
 | `--temperature`    | float   | ❌       | `0.7`                      | 0.0-2.0 range                                          | Sampling temperature for response creativity |
 | `--top_p`          | float   | ❌       | `1.0`                      | 0.0-1.0 range                                          | Nucleus sampling top_p parameter             |
@@ -417,6 +417,7 @@ config/
 | `OPENROUTER_API_KEY`  | `API_PROVIDER=openrouter` or `both` | OpenRouter API key  | `sk-or-v1-...` |
 | `LANGFUSE_PUBLIC_KEY` | Always                              | Langfuse public key | `pk-...`       |
 | `LANGFUSE_SECRET_KEY` | Always                              | Langfuse secret key | `sk-...`       |
+| `LANGFUSE_HOST`       | Always                              | Langfuse host URL   | `https://...`  |
 
 ### Optional Environment Variables
 
@@ -432,7 +433,7 @@ config/
 | `REQUEST_TIMEOUT`  | `30`                                            | Individual API request timeout in seconds         |
 | `RETRY_ATTEMPTS`   | `3`                                             | Number of retry attempts                          |
 | `RETRY_DELAY`      | `1.0`                                           | Delay between retries in seconds                  |
-| `OUTPUT_DIR`       | `output`                                        | Output directory for simulation results           |
+| `OUTPUT_DIR`       | `runouts`                                       | Output directory for simulation results           |
 | `RNG_SEED`         | None                                            | Default RNG seed for deterministic runs           |
 | `TEMPERATURE`      | `0.7`                                           | Default sampling temperature                      |
 | `TOP_P`            | `1.0`                                           | Default nucleus sampling top_p                    |
@@ -602,6 +603,52 @@ DEBUG=true
 LOG_LEVEL=DEBUG
 REQUEST_TIMEOUT=60
 --timeout 300
+```
+
+## 🎯 Deterministic Mode & Configuration Precedence
+
+### Deterministic Mode
+
+When you provide a seed and set `temperature=0.0` and `top_p=1.0`, the system automatically enables deterministic mode for reproducible outputs:
+
+```bash
+# Deterministic run - produces identical outputs
+python simulate.py \
+  --persona personas/alex_smith.yml \
+  --scenario scenarios/referralCrisis_seniorBackendEngineer.yml \
+  --seed 12345 \
+  --temperature 0.0 \
+  --top_p 1.0
+```
+
+**Features:**
+- Stable run IDs (no timestamp variation)
+- Normalized timestamps and elapsed time
+- Identical `.md` and `.jsonl` outputs across runs
+- Same Langfuse trace content and tags
+
+### Configuration Precedence
+
+Configuration values follow this hierarchy: **CLI > ENV > Default**
+
+```bash
+# Example: CLI overrides ENV
+export TEMPERATURE=0.9
+export TOP_P=0.7
+python simulate.py --temperature 0.2 --top_p 1.0
+# Result: temperature=0.2, top_p=1.0 (CLI wins)
+```
+
+### RUN_SUMMARY_JSON Output
+
+Every run emits a structured summary line for automation:
+
+```bash
+# Success example
+RUN_SUMMARY_JSON:{"batch_id":"single","build_version":"abc123","deterministic_mode":true,"item_id":"single","persona":"Alex Smith","persona_version":"unknown","p50_turn_latency_ms":null,"proxy_model":"gpt-4o-mini","scenario":"Senior Backend Engineer","scenario_version":"unknown","seed":12345,"status":"success","sut_model":"gpt-4o-mini","sut_prompt_name":"prompts/recruiter_v1.txt","sut_prompt_version":"unknown","temperature":0.0,"top_p":1.0,"total_runtime_ms":45230,"trace_id":null,"turns":8}
+
+# Failure example  
+RUN_SUMMARY_JSON:{"batch_id":"single","build_version":"abc123","deterministic_mode":false,"error":"Missing required environment variables: langfuse_host (from LANGFUSE_HOST)","item_id":"single","persona":null,"persona_version":"unknown","p50_turn_latency_ms":null,"proxy_model":null,"scenario":null,"scenario_version":"unknown","seed":null,"status":"failed","sut_model":null,"sut_prompt_name":null,"sut_prompt_version":"unknown","temperature":null,"top_p":null,"total_runtime_ms":null,"trace_id":null,"turns":null}
 ```
 
 ## 🔍 Configuration Validation
