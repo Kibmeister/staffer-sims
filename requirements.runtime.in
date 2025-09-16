@@ -3,3 +3,4 @@ PyYAML
 python-dotenv
 requests
 langfuse
+setuptools==78.1.1
