@@ -6,9 +6,11 @@ on:
     branches: [main]
     tags: ['v*.*.*']
 
+# Grant GITHUB_TOKEN rights to push to GHCR and upload Trivy results if you add SARIF later
 permissions:
   contents: read
   packages: write
+  security-events: write
 
 jobs:
   docker:
@@ -29,6 +31,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # NOTE: Pick ONE canonical image name and use it everywhere.
+      # If you want the package to be "simulate", keep images: ghcr.io/${{ github.repository_owner }}/simulate
+      # If you'd rather match the repo, change both occurrences to .../${{ github.repository_owner }}/staffer-sims
       - name: Extract metadata (tags, labels)
         id: meta
         uses: docker/metadata-action@v5
@@ -36,25 +41,30 @@ jobs:
           images: ghcr.io/${{ github.repository_owner }}/simulate
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=sha
+            type=sha,prefix=sha-,format=short
             type=ref,event=tag
 
+      # Build once locally for fast Trivy scan (no push yet)
       - name: Build image for local scan
         uses: docker/build-push-action@v6
         with:
           context: .
           load: true
           tags: simulate:local
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Scan image with Trivy
         uses: aquasecurity/trivy-action@0.24.0
         with:
           image-ref: simulate:local
-          format: 'table'
+          format: 'table' # keep table output in logs
           ignore-unfixed: true
           vuln-type: 'os,library'
-          exit-code: '1'
+          severity: 'CRITICAL,HIGH' # (optional) be explicit about severities
+          exit-code: '1' # fail on findings
 
+      # Real multi-arch build & push with the exact tags from metadata
       - name: Build and push (multi-arch)
         if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
@@ -66,3 +76,13 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Reduce size / avoid attestation surprises unless you want them
+          provenance: false
+          sbom: false
+
+      # Optional: smoke run to verify the image is runnable
+      - name: Smoke test (help)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          docker pull $(echo '${{ steps.meta.outputs.tags }}' | tr ',' '\n' | head -n1)
+          docker run --rm $(echo '${{ steps.meta.outputs.tags }}' | tr ',' '\n' | head -n1) --help || true
