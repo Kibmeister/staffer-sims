@@ -58,12 +58,12 @@ jobs:
         uses: aquasecurity/trivy-action@0.24.0
         with:
           image-ref: simulate:local
-          format: 'sarif'           # SARIF format for Security tab
+          format: 'sarif' # SARIF format for Security tab
           output: 'trivy-results.sarif'
           ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH' # (optional) be explicit about severities
-          exit-code: '1'            # fail on findings
+          exit-code: '1' # fail on findings
 
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3

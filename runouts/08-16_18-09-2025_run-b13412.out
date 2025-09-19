@@ -1,0 +1,10 @@
+Saved: runouts/08-16_18-09-2025_run-b13412__alex-smith__senior-backend-engineer-referral-crisis__seed_2493590757.md
+Saved: runouts/08-16_18-09-2025_run-b13412__alex-smith__senior-backend-engineer-referral-crisis__seed_2493590757.jsonl
+Conversation Outcome: ConversationStatus.COMPLETED_SUCCESSFULLY (Level: 100%)
+Conversation Duration: 62.2s / 120s
+⚠️  Failures Detected: 1 total
+Sampling Parameters: Seed=2493590757, Temp=default, Top-P=default
+Information Gathered: 1 skills, Role: Onsite, Hybrid, Or Remote, Location: Onsite
+API Usage: 75894 tokens (15 SUT + 15 Proxy calls)
+Estimated Cost: $0.011749
+Evaluations: Sent to Langfuse for processing
