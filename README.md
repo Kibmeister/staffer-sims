@@ -98,6 +98,30 @@ python simulate.py --persona personas/alex_smith.yml --scenario scenarios/referr
 python simulate.py --persona personas/alex_smith.yml --scenario scenarios/referralCrisis_seniorBackendEngineer.yml --output my_results
 ```
 
+### Schema requirements (required fields)
+
+Persona and scenario YAMLs must include specific top-level keys:
+
+- Persona: required field `name`
+- Scenario: required field `title`
+
+Minimal examples:
+
+```yaml
+# persona.yml
+name: 'Proxy Dev'
+clarity: 1.0
+hesitation: 0.1
+```
+
+```yaml
+# scenario.yml
+title: 'hello_world'
+goal: 'Trigger the simulation engine end-to-end.'
+steps:
+  - 'Ask SUT a trivial question.'
+```
+
 ## 🖥️ CLI Arguments
 
 The `simulate.py` script supports comprehensive command-line arguments with robust validation:
@@ -869,31 +893,71 @@ RUN_SUMMARY_JSON:{"batch_id":"single","build_version":"abc123","deterministic_mo
 RUN_SUMMARY_JSON:{"batch_id":"single","build_version":"abc123","deterministic_mode":false,"error":"Missing required environment variables: langfuse_host (from LANGFUSE_HOST)","item_id":"single","persona":null,"persona_version":"unknown","p50_turn_latency_ms":null,"proxy_model":null,"scenario":null,"scenario_version":"unknown","seed":null,"status":"failed","sut_model":null,"sut_prompt_name":null,"sut_prompt_version":"unknown","temperature":null,"top_p":null,"total_runtime_ms":null,"trace_id":null,"turns":null}
 ```
 
-## 🐳 Docker (B-01 — Containerize the simulator CLI)
+## 🐳 Docker (GHCR) — Run the published image
 
-A minimal, non-root image is provided to run the simulator reproducibly.
+A minimal, non-root image is published to GHCR for reproducible runs.
 
-### Build
+### Pull (private image requires login)
 
 ```bash
-docker build -t staffer-sims/simulate:dev .
+# If private
+echo "$GHCR_PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
+docker pull ghcr.io/kibmeister/simulate:latest
 ```
 
-### Usage
+### Run with built-in persona/scenario
+
+Note: containers do not read your host `.env` automatically. Provide env via `--env-file` or mount `/app/.env`.
 
 ```bash
-# Show CLI flags
-docker run --rm staffer-sims/simulate:dev --help
-
-# Example run (adjust paths and env as needed)
+# Using your local .env file (KEY=VALUE lines, no quotes)
 docker run --rm \
-  -e LANGFUSE_PUBLIC_KEY=$LANGFUSE_PUBLIC_KEY \
-  -e LANGFUSE_SECRET_KEY=$LANGFUSE_SECRET_KEY \
-  -e LANGFUSE_HOST=$LANGFUSE_HOST \
-  staffer-sims/simulate:dev \
-  --persona personas/alex_smith.yml \
-  --scenario scenarios/referralCrisis_seniorBackendEngineer.yml \
-  --temperature 0.0 --top_p 1.0 --timeout 90
+  --env-file ./.env \
+  ghcr.io/kibmeister/simulate:latest \
+  --persona /app/personas/alex_smith.yml \
+  --scenario /app/scenarios/ai_scepticism_in_recruitment.yml \
+  --sut-prompt /app/prompts/recruiter_v1.txt \
+  --seed 4103845181 --temperature 0.0 --top_p 1.0
+```
+
+### Persist outputs locally
+
+```bash
+docker run --rm \
+  --env-file ./.env \
+  -v "$PWD/runouts:/app/runouts" \
+  ghcr.io/kibmeister/simulate:latest \
+  --persona /app/personas/alex_smith.yml \
+  --scenario /app/scenarios/ai_scepticism_in_recruitment.yml \
+  --sut-prompt /app/prompts/recruiter_v1.txt
+```
+
+### Run with your generated files
+
+```bash
+WORKDIR=$(mktemp -d)
+cat >"$WORKDIR/demo-1-persona.yml" <<'YAML'
+name: "Proxy Dev"
+clarity: 1.0
+hesitation: 0.1
+YAML
+cat >"$WORKDIR/demo-1-scenario.yml" <<'YAML'
+title: "hello_world"
+goal: "Trigger the simulation engine end-to-end."
+steps:
+  - "Ask SUT a trivial question."
+YAML
+
+docker run --rm \
+  --env-file ./.env \
+  -v "$WORKDIR:/work" \
+  -v "$PWD/runouts:/app/runouts" \
+  ghcr.io/kibmeister/simulate:latest \
+  --persona /work/demo-1-persona.yml \
+  --scenario /work/demo-1-scenario.yml \
+  --sut-prompt /app/prompts/recruiter_v1.txt \
+  --seed 4103845181 --temperature 0.0 --top_p 1.0
 ```
 
 ### Image properties
@@ -923,10 +987,10 @@ Security scanning: Trivy runs on the published `:latest` image and fails the job
 
 ```bash
 # Replace <org> with your GitHub org/username
-docker buildx imagetools inspect ghcr.io/staffer-ai/simulate:latest
+docker buildx imagetools inspect ghcr.io/kibmeister/simulate:latest
 
-docker pull ghcr.io/staffer-ai/simulate:latest
-docker run --rm ghcr.io/staffer-ai/simulate:latest --help | head -20
+docker pull ghcr.io/kibmeister/simulate:latest
+docker run --rm ghcr.io/kibmeister/simulate:latest --help | head -20
 ```
 
 This is a really big change "staffy staffer"
@@ -951,6 +1015,32 @@ Ensure Actions are enabled in repo settings. The workflow uses `GITHUB_TOKEN` to
 2. **Import Errors**: Make sure you're running from the project root directory
 3. **Configuration Issues**: Run `python validate_config.py` to check your setup
 4. **Permission Errors**: Ensure output directory is writable
+
+## 🔌 n8n + Hetzner runner (Mode A)
+
+- SSH credential: user `root` (or `runner` once created), auth "Private Key"; paste private key (no passphrase if generated with `-N ""`).
+- Pre-step (SSH Exec) for private images:
+
+```bash
+echo "$GHCR_PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null 2>&1
+```
+
+- Main step (SSH Exec) to run the simulator:
+
+```bash
+docker run --rm \
+  --env-file /root/.env \
+  -v /tmp/simwork:/work \
+  ghcr.io/kibmeister/simulate:latest \
+  --persona /app/personas/alex_smith.yml \
+  --scenario /app/scenarios/ai_scepticism_in_recruitment.yml \
+  --sut-prompt /app/prompts/recruiter_v1.txt
+```
+
+Notes:
+
+- Containers do not inherit the host environment; provide env via `--env-file` or mount `/app/.env`.
+- For security, store PATs and API keys in n8n Credentials; n8n masks them in logs.
 
 ### Debug Mode
 

@@ -1,0 +1,10 @@
+Saved: runouts/13-55_20-09-2025_run-d0ecbb__alex-smith__ai-skepticism-in-recruitment__seed_2983080621.md
+Saved: runouts/13-55_20-09-2025_run-d0ecbb__alex-smith__ai-skepticism-in-recruitment__seed_2983080621.jsonl
+Conversation Outcome: ConversationStatus.COMPLETED_SUCCESSFULLY (Level: 100%)
+Conversation Duration: 35.5s / 120s
+⚠️  Failures Detected: 1 total
+Sampling Parameters: Seed=2983080621, Temp=default, Top-P=default
+Information Gathered: 1 skills, Role: In A Candidate For Your Current Role, Location: Onsite
+API Usage: 78214 tokens (15 SUT + 15 Proxy calls)
+Estimated Cost: $0.012116
+Evaluations: Sent to Langfuse for processing
