@@ -216,7 +216,7 @@ Create a `.env` file based on `env.template`:
 # Environment selection
 ENVIRONMENT=development
 
-# API Provider (openrouter, openai, etc.)
+# API Provider (openrouter, openai, etc. - open ai key updated)
 API_PROVIDER=openrouter
 
 # API Keys
